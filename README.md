@@ -1,5 +1,7 @@
 # My TV（OptimalTV 工程）
 
+My TV 是一款面向电视大屏、手机和平板的原生影视应用，采用 Kotlin、Jetpack Compose 和 Media3 构建，支持直播、点播、影视搜索、播放器控制及卡密授权等功能。项目同时提供云端网页版和后台管理能力，并将 Python 后端集成到 Android 应用中，实现设备端自给自足与前端热更新，适合家庭影音和大屏场景使用。
+
 Android 原生影视应用（TV 大屏 + 手机/平板双端）+ 云端网页版。Kotlin + Jetpack Compose + Media3，
 tvOS 深色风格；Python 后端内嵌进 app（Chaquopy），设备端自给自足。商业化 = 卡密付费（公测版）。
 
