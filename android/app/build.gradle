@@ -1,0 +1,175 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.devtools.ksp'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.qiubo.optimaltv'
+    compileSdk 35
+
+    defaultConfig {
+        // v1.19 版本重规划（2026-09-03）：只保留原公测版一条线，命名「TV 版」。
+        // 包名沿用公测版 com.qiubo.optimaltv.public——老公测用户直接覆盖升级
+        applicationId "com.qiubo.optimaltv.public"
+        // 技术方案 §4.2：坚果 N1 Air = Bonfire OS / Android 11 → minSdk 30，零 GMS 依赖
+    minSdk 30
+    targetSdk 34
+    // v1.24（2026-09-11 第四批优化）：海报/筛选提速、TV 投屏全删、播放器侧栏光标
+    // 修复 + 换源全源展示、我的页会员行改版
+    versionCode 26
+    versionName "1.24"
+        // 方案 §5：双 ABI split 思路——真机 arm64/v7a + 模拟器 x86_64（开发验证用）
+        ndk { abiFilters "arm64-v8a", "armeabi-v7a", "x86_64" }
+        // AOSP 谷歌拼音解码器（搜索页拼音候选，2026-08-29）；默认 c++_static（new/delete 需要 libc++）
+        // v1.19 版本重规划：内测/公测双 flavor 退役——只保留一条正式分发线（原公测版）。
+        // 卡密门控/热更新为正式线标配（LICENSE_*/HOTUPDATE_* 常量原公测口径）。
+        // v1.18 热更新：云端下发内嵌后端 zip，启动时静默检查+预下载，下次冷启动生效
+        resValue 'string', 'app_name', 'My TV'
+        buildConfigField 'boolean', 'LICENSE_ENABLED', 'true'
+        buildConfigField 'String', 'LICENSE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/activate"'
+        buildConfigField 'boolean', 'HOTUPDATE_ENABLED', 'true'
+        buildConfigField 'String', 'HOTUPDATE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/hotupdate"'
+        // 启动门闸预算：TV 90s（用户要求全加载完再进，遥控场景可等）；App.kt 共享读取。
+        // 2026-09-03 事故教训见 mobile 的 30000 注释
+        buildConfigField 'long', 'STARTUP_GATE_MS', '90000'
+
+        // 焦点导航仪器测试（2026-09-06 三层测试体系第二层）：自定义 Runner 换轻量
+        // FocusTestApp（绕开 App.kt 的 Chaquopy 后端/许可证/启动门闸），harness 见
+        // androidTest/.../focus/。真实按键注入（Espresso sendKeySync → Activity
+        // .dispatchKeyEvent → OtvNav.dispatch）+ assertIsFocused 语义断言。
+        testInstrumentationRunner 'com.qiubo.optimaltv.focus.FocusTestRunner'
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++14 -fexceptions"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/pinyinime/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    signingConfigs {
+        release {
+            // 发布签名（2026-08-27 生成，10 年有效期；上架商店若换自有签名须先卸载旧包）
+            storeFile file("../optimaltv-release.keystore")
+            storePassword "optimaltv2026"
+            keyAlias "optimaltv"
+            keyPassword "optimaltv2026"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false   // Chaquopy + 反射（引擎/Room）保守不混淆
+            signingConfig signingConfigs.release
+        }
+        debug {
+            // v1.20 QA：debug 也用发布签名——可覆盖安装 release（保激活/收藏等数据），
+            // 模拟器经 otvDebugLicense 注码通道激活后装回 release 即可验证激活态
+            signingConfig signingConfigs.release
+        }
+    }
+
+    buildFeatures { compose true; buildConfig true }
+    composeOptions { kotlinCompilerExtensionVersion '1.5.14' }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+    packagingOptions {
+        resources { excludes += ['META-INF/{AL2.0,LGPL2.1}'] }
+        // v1.8：libVLC 兜底引擎带入三 ABI so（~140MB 未压缩）——legacy 打包压缩之，
+        // 代价仅首次启动多一步解压（TV 盒子一次性）
+        jniLibs { useLegacyPackaging = true }
+    }
+}
+
+// 后端打包进 app：Chaquopy 配置（proxy.py 只用标准库 + 自有模块，无需 pip 包）
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+    }
+}
+
+// 统一产物到项目目录（v1.19 版本重规划定稿）：apk/TV版/ 固定名 MyTV-TV版.apk，
+// 由 assembleRelease 复制（对外分发=签名+卡密+热更新正式链路）。
+// debug 测试包不进 apk/——直接用 zcode-build 构建输出目录。
+tasks.register("copyTvApk", Copy) {
+    from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+    into(file("D:/MyProjects/My TV/apk/TV版"))
+    rename { "MyTV-TV版.apk" }
+}
+// AGP 的 assemble 任务在 android 插件注册后才出现，须在 afterEvaluate 挂接依赖
+afterEvaluate {
+    tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy("copyTvApk") }
+}
+
+dependencies {
+    def composeBom = platform('androidx.compose:compose-bom:2024.06.00')
+    implementation composeBom
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
+    // 注：androidx.tv:tv-foundation 已被上游以 Kotlin 2.1 元数据重发布，
+    // 与本工程锁定工具链(Kotlin 1.9.24)不兼容；网格用 foundation LazyVerticalGrid，
+    // D-pad 滚动行为一致（技术方案 §3.4 的 TvLazyVerticalGrid 等价替代）。
+
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.activity:activity-compose:1.9.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.3'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.3'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3'
+    implementation 'androidx.navigation:navigation-compose:2.7.7'
+
+    // 播放引擎层（技术方案 §3.2）：Media3 默认内核；VLC 兜底内核（直播解码失败自动切换）
+    implementation 'androidx.media3:media3-exoplayer:1.5.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.5.1'
+    implementation 'androidx.media3:media3-ui:1.5.1'
+    implementation 'androidx.media3:media3-datasource:1.5.1'
+    // libVLC 兜底引擎（v1.8 2026-08-30）：自带完整 ffmpeg 软解——模拟器/个别盒子的
+    // MediaCodec 全系解不动 AVC High(8x8+CABAC) 压段（SoftAVCDec Fatal 0xffffffff），
+    // VLC 关闭其 mediacodec 硬解后用自带 avcodec 软解，任何设备都能出画面
+    implementation 'org.videolan.android:libvlc-all:3.7.2'
+
+    // 数据层（技术方案 §3.5）：Room 三表 + DataStore KV
+    implementation 'androidx.room:room-runtime:2.6.1'
+    implementation 'androidx.room:room-ktx:2.6.1'
+    ksp 'androidx.room:room-compiler:2.6.1'
+    implementation 'androidx.datastore:datastore-preferences:1.1.1'
+
+    // 图片：Coil 内存/磁盘双缓存（低内存机限额见 App.kt）
+    implementation 'io.coil-kt:coil-compose:2.6.0'
+    // 队标 SVG 解码（football-data crests 为 svg，Coil 默认不支持）
+    implementation 'io.coil-kt:coil-svg:2.6.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // v1.17 公测版：会员页购买二维码生成（BitMatrix 自绘 Canvas，无嵌入视图依赖）
+    implementation 'com.google.zxing:core:3.5.3'
+
+    // 焦点导航几何规则（NavGeom）JVM 单元测试
+    testImplementation 'junit:junit:4.13.2'
+
+    // 焦点导航仪器测试（第二层）：Compose ui-test 的 performKeyInput 经 Espresso
+    // sendKeySync 注入真按键，走 Activity.dispatchKeyEvent 全链路（与遥控器同路径）
+    androidTestImplementation composeBom
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    // Espresso.pressKey = 窗口级按键注入（instrumentation.sendKeySync → Activity
+    // .dispatchKeyEvent → OtvNav）；compose 的 performKeyInput 直注 Compose 层测不了引擎
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
+}

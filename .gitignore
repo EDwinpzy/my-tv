@@ -1,0 +1,38 @@
+# Android / Gradle build outputs
+.gradle/
+**/build/
+**/.cxx/
+*.apk
+*.aab
+*.apks
+*.idsig
+local.properties
+
+# IDE and local machine files
+.idea/
+*.iml
+.vscode/
+*.log
+
+# Generated and local-only project data
+apk/
+shots/
+out/
+img_cache/
+.playwright-mcp/
+.v2c/
+.video_agent/
+.learnings/
+tools/keys/
+*.whl
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# OS files
+Thumbs.db
+.DS_Store

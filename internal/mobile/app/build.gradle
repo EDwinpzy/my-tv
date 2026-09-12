@@ -1,0 +1,148 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'com.google.devtools.ksp'
+    id 'com.chaquo.python'
+}
+
+android {
+    namespace 'com.qiubo.optimaltv'
+    compileSdk 35
+
+    defaultConfig {
+        // 移动版（手机/平板触屏）：与 TV 版同命名空间、不同 applicationId，
+        // 可与 TV 版同设备共存、数据互相隔离。
+        // v1.19 版本重规划（2026-09-03）：只保留原公测移动一条线，命名「移动版」；
+        // 包名沿用公测移动 com.qiubo.optimaltv.mobile.public——老公测用户直接覆盖升级
+        applicationId "com.qiubo.optimaltv.mobile.public"
+        // 版本号与 TV 版保持同步（同一套版本基线，见 tools/sync_shared.py）
+        minSdk 30
+        targetSdk 34
+        // v1.19：竖屏自适应解锁（总体#2），横屏仍与 TV 版同款 1920 设计稿
+        versionCode 26
+        versionName "1.24"
+        // 与 TV 版一致的三 ABI（Chaquopy/libVLC so 需要）；移动版无 cpp 拼音解码器
+        ndk { abiFilters "arm64-v8a", "armeabi-v7a", "x86_64" }
+
+        // v1.19 版本重规划：内测/公测双 flavor 退役——只保留原公测移动一条线（命名「移动版」）。
+        // 卡密门控为正式线标配；热更新与 TV 版共用同一通道（同一后端 zip）
+        resValue 'string', 'app_name', 'My TV 移动版'
+        buildConfigField 'boolean', 'LICENSE_ENABLED', 'true'
+        buildConfigField 'String', 'LICENSE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/activate"'
+        buildConfigField 'boolean', 'HOTUPDATE_ENABLED', 'true'
+        buildConfigField 'String', 'HOTUPDATE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/hotupdate"'
+        // 启动门闸预算（App.kt 共享读取）：移动端 30s——2026-09-03 事故：首装冷缓存下
+        // 90s 兜底全跑满（hhkan 冷抓+327 封面预载），用户感知「卡启动屏打不开」；
+        // TV 遥控场景可等 90s，移动端 30s 必进主界面，剩余预载转后台继续
+        buildConfigField 'long', 'STARTUP_GATE_MS', '30000'
+
+        // 移动端组件级仪器测试：换轻量 Application，避免测试被内嵌后端、
+        // 许可证和启动门闸耦合；真实业务组件仍由 debug harness 原生渲染。
+        testInstrumentationRunner 'com.qiubo.optimaltv.mobileui.MobileUiTestRunner'
+    }
+
+
+    signingConfigs {
+        release {
+            // 发布签名与 TV 版同一把（10 年有效期；两版本可共存安装）
+            storeFile file("../optimaltv-release.keystore")
+            storePassword "optimaltv2026"
+            keyAlias "optimaltv"
+            keyPassword "optimaltv2026"
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false   // Chaquopy + 反射（引擎/Room）保守不混淆
+            signingConfig signingConfigs.release
+        }
+        debug {
+            // v1.20 QA：debug 也用发布签名（同 TV 版）——可覆盖安装 release 保数据
+            signingConfig signingConfigs.release
+        }
+    }
+
+    // buildConfig：v1.17 LICENSE_ENABLED / LICENSE_ENDPOINT 门控开关（flavor 注入）
+    buildFeatures { compose true; buildConfig true }
+    composeOptions { kotlinCompilerExtensionVersion '1.5.14' }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+    packagingOptions {
+        resources { excludes += ['META-INF/{AL2.0,LGPL2.1}'] }
+        // libVLC 三 ABI so 压缩打包（与 TV 版同策略）
+        jniLibs { useLegacyPackaging = true }
+    }
+}
+
+// 后端打包进 app：Chaquopy 配置（与 TV 版字节级一致，见 sync_shared.py 同步清单）
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+    }
+}
+
+// 统一产物到项目目录（v1.19 版本重规划定稿）：apk/移动版/ 固定名 MyTV-移动版.apk，
+// 由 assembleRelease 复制（对外分发=签名+卡密+热更新正式链路）。
+// debug 测试包不进 apk/——直接用 zcode-build 构建输出目录。
+tasks.register("copyMobileApk", Copy) {
+    from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+    into(file("D:/MyProjects/My TV/apk/移动版"))
+    rename { "MyTV-移动版.apk" }
+}
+// AGP 的 assemble 任务在 android 插件注册后才出现，须在 afterEvaluate 挂接依赖
+afterEvaluate {
+    tasks.matching { it.name == "assembleRelease" }.configureEach { finalizedBy("copyMobileApk") }
+}
+
+dependencies {
+    def composeBom = platform('androidx.compose:compose-bom:2024.06.00')
+    implementation composeBom
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3'
+
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.activity:activity-compose:1.9.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.3'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.3'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3'
+    implementation 'androidx.navigation:navigation-compose:2.7.7'
+
+    // 播放引擎层：与 TV 版完全一致（Media3 默认 + libVLC 兜底三段回退）
+    implementation 'androidx.media3:media3-exoplayer:1.5.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.5.1'
+    implementation 'androidx.media3:media3-ui:1.5.1'
+    implementation 'androidx.media3:media3-datasource:1.5.1'
+    implementation 'org.videolan.android:libvlc-all:3.7.2'
+
+    // 数据层：Room 三表 + DataStore KV（与 TV 版一致）
+    implementation 'androidx.room:room-runtime:2.6.1'
+    implementation 'androidx.room:room-ktx:2.6.1'
+    ksp 'androidx.room:room-compiler:2.6.1'
+    implementation 'androidx.datastore:datastore-preferences:1.1.1'
+
+    // 图片：Coil 双缓存 + SVG 队标解码（与 TV 版一致）
+    implementation 'io.coil-kt:coil-compose:2.6.0'
+    implementation 'io.coil-kt:coil-svg:2.6.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    // v1.17 公测版：会员页购买二维码生成（BitMatrix 自绘 Canvas，与 TV 版同款）
+    implementation 'com.google.zxing:core:3.5.3'
+
+    // 移动端 Compose 组件级自动化测试。
+    androidTestImplementation composeBom
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
+}

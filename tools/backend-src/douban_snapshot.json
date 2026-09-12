@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "source": "douban",
+  "generatedAt": "2026-09-12T00:00:00+08:00",
+  "home": {
+    "movie": {"category": "movie", "sections": [{"title": "最近热门", "items": []}, {"title": "最新上映", "items": []}, {"title": "豆瓣高分", "items": []}]},
+    "tv": {"category": "tv", "sections": [{"title": "最近热门", "items": []}, {"title": "最新上映", "items": []}, {"title": "豆瓣高分", "items": []}]},
+    "anime": {"category": "anime", "sections": [{"title": "最近热门", "items": []}, {"title": "最新上映", "items": []}, {"title": "豆瓣高分", "items": []}]},
+    "variety": {"category": "variety", "sections": [{"title": "最近热门", "items": []}, {"title": "最新上映", "items": []}, {"title": "豆瓣高分", "items": []}]},
+    "short": {"category": "short", "sections": [{"title": "最近热门", "items": []}, {"title": "最新上映", "items": []}, {"title": "豆瓣高分", "items": []}]}
+  }
+}

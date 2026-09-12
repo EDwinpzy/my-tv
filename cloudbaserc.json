@@ -1,0 +1,14 @@
+{
+  "version": "2.0",
+  "envId": "appletv-d5ge1bth794873f76",
+  "functions": [
+    {
+      "name": "otv-admin",
+      "timeout": 60,
+      "memorySize": 256,
+      "runtime": "Python3.9",
+      "installDependency": true,
+      "handler": "admin_server.main"
+    }
+  ]
+}

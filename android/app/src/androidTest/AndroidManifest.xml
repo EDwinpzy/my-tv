@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- harness Activity 已挪至主 app debug 变体（原生主进程启动更稳）；此处不再声明 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+</manifest>
