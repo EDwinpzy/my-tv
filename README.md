@@ -2,6 +2,27 @@
 
 My TV 是一款面向电视大屏、手机和平板的原生影视应用，采用 Kotlin、Jetpack Compose 和 Media3 构建，支持直播、点播、影视搜索、播放器控制及卡密授权等功能。项目同时提供云端网页版和后台管理能力，并将 Python 后端集成到 Android 应用中，实现设备端自给自足与前端热更新，适合家庭影音和大屏场景使用。
 
+## 产品展示
+
+### TV 大屏频道浏览
+
+![TV 大屏频道浏览](shots/tv_v_01_browse.png)
+
+### 手机与平板影视详情
+
+![移动端影视详情](shots/mobile-own-emulator-detail-landscape.png)
+
+### 影视搜索与内容发现
+
+![移动端影视搜索](shots/mobile-own-emulator-search-love.png)
+
+## 项目亮点
+
+- 面向 TV 遥控器交互优化，支持大屏焦点导航与播放器控制
+- Android TV、手机和平板多端适配，统一数据与播放能力
+- 支持直播、点播、分类筛选、搜索、收藏和影视详情
+- 内置 Python 后端与云端服务，支持热更新和后台管理
+
 Android 原生影视应用（TV 大屏 + 手机/平板双端）+ 云端网页版。Kotlin + Jetpack Compose + Media3，
 tvOS 深色风格；Python 后端内嵌进 app（Chaquopy），设备端自给自足。商业化 = 卡密付费（公测版）。
 
