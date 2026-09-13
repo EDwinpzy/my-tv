@@ -1707,6 +1707,8 @@ def relayts_generator(match_id, src):
 TEAM_ICON_CACHE_FILE = Path(__file__).parent / "team_icon_cache.json"
 TEAM_ICON_CACHE = {}
 _tdb_last_call = 0
+# football-logos.cc autocomplete index (4,800+ entries, fetched once per process).
+FOOTBALL_LOGOS_INDEX = None
 # football-data SVG 队徽内存缓存（本地代理返回，避免浏览器直连被限流）
 SVG_ICON_CACHE = {}
 SVG_ICON_LOCK = threading.Lock()
@@ -1851,6 +1853,62 @@ def save_team_icon_cache():
         pass
 
 
+def _football_logo_key(value):
+    """Normalize display names so e.g. `Liverpool` matches `Liverpool FC`."""
+    value = (value or "").replace("_", " ").lower()
+    value = re.sub(r"\b(football club|futbol club|fc|cf|ac|sc)\b", " ", value)
+    return re.sub(r"[^a-z0-9]+", "", value)
+
+
+def _football_logos_search_team(team_name):
+    """Resolve a team against football-logos.cc's public autocomplete index."""
+    global FOOTBALL_LOGOS_INDEX
+    english_name = team_backdrop.TEAM_EN.get(team_name, team_name).replace("_", " ")
+    query_key = _football_logo_key(english_name)
+    if not query_key:
+        return None
+
+    if FOOTBALL_LOGOS_INDEX is None:
+        try:
+            req = urlreq.Request(
+                "https://football-logos.cc/ac-v2.json",
+                headers={"User-Agent": UA, "Accept": "application/json"},
+            )
+            with urlreq.urlopen(req, timeout=5) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            FOOTBALL_LOGOS_INDEX = payload if isinstance(payload, list) else []
+        except Exception:
+            return None
+
+    matches = []
+    for item in FOOTBALL_LOGOS_INDEX:
+        if not isinstance(item, dict):
+            continue
+        candidate_key = _football_logo_key(item.get("name"))
+        category = item.get("categoryId")
+        logo_id = item.get("id")
+        logo_hash = item.get("h")
+        if not (candidate_key and category and logo_id and logo_hash):
+            continue
+        if candidate_key == query_key:
+            score = 0
+        elif candidate_key.startswith(query_key):
+            score = 1
+        elif query_key in candidate_key:
+            score = 2
+        else:
+            continue
+        matches.append((score, len(candidate_key), category, logo_id, logo_hash))
+
+    if not matches:
+        return None
+    _, _, category, logo_id, logo_hash = min(matches)
+    return (
+        "https://assets.football-logos.cc/logos/"
+        f"{category}/64x64/{logo_id}.{logo_hash}.png"
+    )
+
+
 def _tdb_search_team(team_name):
     """串行查询 TheSportsDB（带退避防 429）。返回 {badge, id_api_football} 或 None。
 
@@ -1961,7 +2019,8 @@ def _normalize_team_name(name):
 
 def resolve_team_icon(team_name):
     """解析球队队标 URL。
-    优先级: 0) 别名/脏名归一化  1) football-data SVG  2) 本地已知映射  3) 本地缓存  4) TheSportsDB 查询  5) 默认空
+    优先级: 0) 别名/脏名归一化  1) football-data SVG  2) 本地已知映射
+    3) 本地缓存  4) football-logos.cc  5) TheSportsDB 查询  6) 默认空
     返回 dict: {url, source, id}
     """
     team_name = _normalize_team_name(team_name)
@@ -2187,7 +2246,18 @@ def resolve_team_icon(team_name):
         if int(_time.time()) - int(cache.get("ts", 0)) < ttl:
             return {"url": cache.get("url"), "source": "cache", "id": cache.get("id")}
 
-    # 3. TheSportsDB 查询
+    # 3. football-logos.cc 在线补全（非商业项目使用）；成功结果进入既有磁盘缓存。
+    football_logos_url = _football_logos_search_team(team_name)
+    if football_logos_url:
+        TEAM_ICON_CACHE[team_name] = {
+            "url": football_logos_url,
+            "id": None,
+            "ts": int(_time.time()),
+        }
+        save_team_icon_cache()
+        return {"url": football_logos_url, "source": "football_logos_cc", "id": None}
+
+    # 4. TheSportsDB 查询
     tdb = _tdb_search_team(team_name)
     if tdb:
         badge = tdb.get("badge")

@@ -12,7 +12,7 @@ START=$(date +%s)
 echo "WATCH_START $(date)" >> tools/out/public_release_detected.txt
 while true; do
   # A) 文档发布记录
-  if grep -qE "gongce|公测版.{0,20}(发布|versionCode)" docs/版本史.md docs/测试记录.md 2>/dev/null; then
+  if grep -qE "gongce|公测版.{0,20}(发布|versionCode)" docs/04-records/版本史.md docs/04-records/测试记录.md 2>/dev/null; then
     echo "SIGNAL=docs-release $(date)" >> tools/out/public_release_detected.txt
     echo "公测定稿：文档发布记录出现"
     exit 0

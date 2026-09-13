@@ -60,7 +60,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "backend-src"))
 import db_import  # noqa: E402  复用 signin/URL 白名单（凭据读 keys/svc_import_*.txt 或 env）
+import hhkan  # noqa: E402
+import vod_sources  # noqa: E402
 
 PORT = int(os.environ.get("PORT") or 8791)
 CLOUD = bool(os.environ.get("PORT")) or os.environ.get("OTV_CLOUD") == "1"
@@ -208,7 +211,11 @@ def rpc(name: str, payload: dict) -> dict:
 HU_BUCKET = "hotupdate"
 HU_ENDPOINT = "https://appletv-d5ge1bth794873f76.service.tcloudbase.com/hotupdate"
 # 与 APK HotUpdateManager / hotupdate_admin_upsert RPC 的校验口径一致
-HU_REQUIRED_ENTRIES = ("proxy.py", "hhkan.py", "scraper.py", "team_backdrop.py", "decrypt_stream.js")
+HU_REQUIRED_ENTRIES = (
+    "proxy.py", "hhkan.py", "scraper.py", "team_backdrop.py", "decrypt_stream.js",
+    "douban_catalog.py", "douban_snapshot.json", "vod_api.py",
+    "vod_sources.py", "vod_sources.default.json",
+)
 HU_MAX_BYTES = 220 * 1024 * 1024
 
 
@@ -1136,6 +1143,109 @@ def h_iptv_refresh_token(_d: dict) -> dict:
     return {"token": os.environ.get("OTV_REFRESH_TOKEN", "")}
 
 
+# ---------------- 影视播放源管理 ----------------
+
+def vod_test_grade(score: int) -> str:
+    return "优秀" if score >= 80 else "良好" if score >= 60 else "一般" if score >= 40 else "不可用"
+
+
+def h_vod_source_list(_d: dict) -> dict:
+    return rpc("vod_source_admin_list", {})
+
+
+def h_vod_source_save(d: dict) -> dict:
+    name = str(d.get("name") or "").strip()[:80]
+    site_url = str(d.get("site_url") or "").strip()
+    api_url = str(d.get("api_url") or "").strip()
+    adapter = str(d.get("adapter_type") or "").strip()
+    if not name or adapter not in ("hhkan", "macms_json", "macms_xml"):
+        return {"error": "名称或适配器类型不合法"}
+    try:
+        vod_sources._validate_public_url(site_url)
+        if api_url:
+            vod_sources._validate_public_url(api_url)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    return rpc("vod_source_admin_save", {
+        "p_id": d.get("id"), "p_name": name, "p_site_url": site_url,
+        "p_api_url": api_url, "p_adapter_type": adapter,
+        "p_enabled": bool(d.get("enabled", True)), "p_sort_order": int(d.get("sort_order") or 0),
+    })
+
+
+def h_vod_source_delete(d: dict) -> dict:
+    return rpc("vod_source_admin_delete", {"p_id": d.get("id")}) if d.get("id") else {"error": "缺少影视源 ID"}
+
+
+def h_vod_source_discover(d: dict) -> dict:
+    try:
+        source = vod_sources.discover_source(str(d.get("site_url") or "").strip())
+        return {"ok": True, "source": {
+            "id": source.id, "name": source.name, "site_url": source.site_url,
+            "api_url": source.api_url, "adapter_type": source.adapter_type,
+            "enabled": source.enabled, "revision": source.revision}}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)[:180]}
+
+
+def _first_maccms_preview(raw: dict) -> str:
+    for group in str(raw.get("vod_play_url") or "").split("$$$"):
+        for episode in group.split("#"):
+            value = episode.rsplit("$", 1)[-1].strip()
+            if value.startswith(("http://", "https://")):
+                return value
+    return ""
+
+
+def h_vod_source_test(d: dict) -> dict:
+    title = str(d.get("title") or "").strip()[:120]
+    if not title:
+        return {"error": "请输入影片名称"}
+    year = str(d.get("year") or "").strip()[:4]
+    episode = max(1, min(9999, int(d.get("episode") or 1)))
+    raw = d.get("source") if isinstance(d.get("source"), dict) else d
+    try:
+        source = vod_sources.VodSource(
+            id=str(raw.get("id") or "test"), name=str(raw.get("name") or "测试源"),
+            site_url=str(raw.get("site_url") or ""), api_url=str(raw.get("api_url") or ""),
+            adapter_type=str(raw.get("adapter_type") or "macms_json"), enabled=True,
+            revision=int(raw.get("revision") or 1))
+        started = time.monotonic()
+        preview, match = "", 0
+        if source.adapter_type.startswith("macms"):
+            candidates = vod_sources.MacCmsAdapter(source).search({"title": title, "year": year})
+            subject = {"title": title, "year": year, "season": 0}
+            best = max(candidates, key=lambda item: vod_sources.match_score(subject, item), default=None)
+            if best:
+                match = vod_sources.match_score(subject, best)
+                preview = _first_maccms_preview(best.get("raw") or {})
+        else:
+            token = hhkan.get_search_token()
+            page = hhkan.get_page("/search?t=%s&k=%s&p=1" % (urllib.parse.quote(token), urllib.parse.quote(title)))
+            cards = hhkan._parse_vod_list(page)
+            exact = next((item for item in cards if vod_sources.normalize_title(item.get("title")) == vod_sources.normalize_title(title)), None)
+            if exact:
+                match = 90
+                detail = hhkan.parse_detail(hhkan.get_page("/detail/%s.html" % exact["id"]), exact["id"])
+                episodes = ((detail.get("sources") or [{}])[0].get("episodes") or [])
+                first = episodes[min(episode - 1, len(episodes) - 1)] if episodes else {}
+                play = hhkan.parse_play_page(hhkan.get_page("/play/%s-%s-%s.html" % (
+                    exact["id"], first.get("pid", 0), first.get("vid", 0))))
+                preview = ((play.get("sources") or [{}])[0].get("url") or "")
+        elapsed = int((time.monotonic() - started) * 1000)
+        speed = 100 if elapsed <= 1000 else 80 if elapsed <= 3000 else 55 if elapsed <= 6000 else 30
+        score = int(match * 0.6 + speed * 0.4) if preview else min(39, int(match * 0.4))
+        return {"grade": vod_test_grade(score), "score": score,
+                "summary": "%s，匹配度 %d，响应 %dms" % ("可试看" if preview else "未取得可播放地址", match, elapsed),
+                "matched": match >= vod_sources.AUTO_MATCH_THRESHOLD, "preview_url": preview}
+    except Exception as exc:  # noqa: BLE001
+        return {"grade": "不可用", "score": 0, "summary": str(exc)[:160], "matched": False, "preview_url": ""}
+
+
+def h_vod_source_publish(_d: dict) -> dict:
+    return rpc("vod_source_admin_publish", {})
+
+
 def h_health(_d: dict) -> dict:
     """激活端点连通探测：用非法格式码打公网端点，网关/云函数活着即返回 ret=400
     （参数层拒绝，不入库不留审计痕迹；signin/RPC 链路由业务请求自然验证）。"""
@@ -1172,6 +1282,13 @@ ROUTES = {
     "/api/hu_health": h_hu_health,
     "/api/ann_get": h_ann_get,
     "/api/ann_publish": h_ann_publish,
+    # 影视源草稿、测试与显式发布（均位于统一会话门禁之后）
+    "/api/vod_source_list": h_vod_source_list,
+    "/api/vod_source_save": h_vod_source_save,
+    "/api/vod_source_delete": h_vod_source_delete,
+    "/api/vod_source_discover": h_vod_source_discover,
+    "/api/vod_source_test": h_vod_source_test,
+    "/api/vod_source_publish": h_vod_source_publish,
     # v1.20 电视源管理
     "/api/iptv_list": h_iptv_list,
     "/api/iptv_save": h_iptv_save,

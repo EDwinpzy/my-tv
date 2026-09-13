@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -89,8 +90,9 @@ fun statusLine(st: LicenseState?): String = when {
     else -> {
         val d = (st as LicenseState.Activated).data
         when {
+            d.expiryAt != null && LicenseManager.effNow() >= d.expiryAt -> "已过期 · 续费后继续观看"
+            !LicenseManager.isPremium() -> "需要联网校验会员状态"
             d.expiryAt == null -> "终身会员"
-            LicenseManager.effNow() >= d.expiryAt -> "已过期 · 续费后继续观看"
             else -> "会员有效 · 剩余 ${LicenseManager.daysLeft()} 天"
         }
     }
@@ -108,6 +110,7 @@ fun LicensePlayerGate(nav: NavController, content: @Composable () -> Unit) {
         return
     }
     val st by LicenseManager.state.collectAsStateWithLifecycle()
+    LaunchedEffect(st) { LicenseManager.requestReverify() }
     when {
         st == null -> Box(Modifier.fillMaxSize().background(OtvColors.Bg))   // 状态加载中（启动门闸后瞬时）
         LicenseManager.isPremium() -> content()

@@ -321,11 +321,14 @@ private fun MemberInlineInfo(
     val infoText: String
     when {
         d == null -> { status = "加载中…"; statusColor = OtvColors.White50; infoText = "" }
-        d.expiryAt == null -> { status = "终身会员"; statusColor = Color(0xFF30D158); infoText = "终身 · 永久有效" }
-        com.qiubo.optimaltv.license.LicenseManager.effNow() >= d.expiryAt -> {
+        d.expiryAt != null && com.qiubo.optimaltv.license.LicenseManager.effNow() >= d.expiryAt -> {
             status = "会员已过期"; statusColor = Color(0xFFFF453A)
             infoText = com.qiubo.optimaltv.ui.paywall.planDisplayName(d.plan) + " · 续费可用"
         }
+        !com.qiubo.optimaltv.license.LicenseManager.isPremium() -> {
+            status = "等待联网校验"; statusColor = Color(0xFFFF9F0A); infoText = "联网后自动恢复"
+        }
+        d.expiryAt == null -> { status = "终身会员"; statusColor = Color(0xFF30D158); infoText = "终身 · 永久有效" }
         else -> {
             status = "会员有效"; statusColor = Color(0xFF30D158)
             infoText = com.qiubo.optimaltv.ui.paywall.planDisplayName(d.plan) +

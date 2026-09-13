@@ -19,6 +19,8 @@ PROJ = TOOLS.parent
 FUNC = PROJ / "cloudfunctions" / "otv-admin"
 
 FILES = ("admin_server.py", "scf_main.py", "admin.html", "db_import.py", "license_gen.py")
+# 影视源后台接口运行时依赖。admin_server.py 在云函数包根目录加载这些模块。
+BACKEND_FILES = ("vod_sources.py", "vod_sources.default.json", "hhkan.py")
 
 BOOTSTRAP = """#!/bin/bash
 cd /var/user
@@ -44,6 +46,9 @@ def main() -> None:
             f.unlink(missing_ok=True)
     for name in FILES:
         shutil.copy2(TOOLS / name, FUNC / name)
+        print("cloudfunctions/otv-admin/", name)
+    for name in BACKEND_FILES:
+        shutil.copy2(TOOLS / "backend-src" / name, FUNC / name)
         print("cloudfunctions/otv-admin/", name)
     shutil.copy2(
         PROJ / "android" / "app" / "src" / "main" / "res" / "drawable" / "my_tv_logo.png",

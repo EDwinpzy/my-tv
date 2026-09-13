@@ -313,7 +313,7 @@ table.pool tr:not(.miss):hover td{background:rgba(255,255,255,.05)}
       <option value="weekly">周卡</option>
     </select>
     <select id="f-status">
-      <option value="">全部状态</option><option value="active">已激活</option><option value="sold">已售未绑定</option><option value="unsold">未售库存</option><option value="banned">已封禁</option>
+      <option value="">全部状态</option><option value="active">已激活</option><option value="redeemed">已用于续费</option><option value="sold">已售未绑定</option><option value="unsold">未售库存</option><option value="banned">已封禁</option>
     </select>
     <button class="act" id="btn-search">查询</button>
     <span class="hint" id="lic-total"></span>
@@ -891,25 +891,30 @@ async function loadOvLedger() {
   pulseDiff("ov-ledger", "ov", Object.fromEntries(d.rows.map(r => [r.code, r.status + r.devices.length + (r.sold_at || "")])));
 }
 function ledgerTable(rows, withOps, fixed, stateId) {
-  const cols = fixed ? '<colgroup><col style="width:17.5%"><col style="width:6.5%"><col style="width:12.5%"><col style="width:9.5%"><col style="width:12%"><col style="width:8.5%"><col></colgroup>' : '';
+  const cols = fixed ? '<colgroup><col style="width:17%"><col style="width:6%"><col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col></colgroup>' : '';
   return `<table class="grid"${fixed ? ' style="table-layout:fixed"' : ''}>` + cols +
-    `<tr>${thSort(stateId, "code", "卡密")}${thSort(stateId, "plan", "套餐")}${thSort(stateId, "status", "状态")}${thSort(stateId, "sold_at", "出售")}${thSort(stateId, "devices", "已绑设备")}${thSort(stateId, "", "备注")}${thSort(stateId, "updated_at", "最近操作")}${withOps ? "<th></th>" : ""}</tr>` +
-    rows.map(r => `<tr data-key="${esc(r.code)}">
+    `<tr>${thSort(stateId, "code", "卡密")}${thSort(stateId, "plan", "套餐")}${thSort(stateId, "status", "状态")}${thSort(stateId, "activated_at", "首次激活")}${thSort(stateId, "expire_at", "统一到期")}${thSort(stateId, "", "续费去向")}${thSort(stateId, "devices", "已绑设备")}${thSort(stateId, "updated_at", "最近操作")}${withOps ? "<th></th>" : ""}</tr>` +
+    rows.map(r => {
+      const redeemed = !!r.redeemed_at;
+      const status = r.status === "banned" ? '<span class="st bad">✕ 封禁</span>'
+        : redeemed ? '<span class="st warn">↗ 已用于续费</span>'
+        : r.activated_at ? '<span class="st ok">● 已激活</span>'
+        : r.sold_at ? '<span class="st warn">◐ 已售未绑</span>'
+        : '<span class="dim">○ 未售</span>';
+      return `<tr data-key="${esc(r.code)}">
       <td>${esc(r.code)}</td>
       <td class="lbl">${PLAN[r.plan] || r.plan}</td>
-      <td>${r.status === "banned" ? '<span class="st bad">✕ 封禁</span>'
-        : r.devices.length ? '<span class="st ok">● 正常</span>'
-        : r.sold_at ? '<span class="st warn">◐ 已售未绑</span>'
-        : '<span class="dim">○ 未售</span>'}</td>
-      <td>${r.sold_at ? `<span title="已售，等待用户激活">${fmtT(r.sold_at)}</span>` : '<span class="dim">—</span>'}</td>
+      <td>${status}</td>
+      <td>${r.activated_at ? `<span title="首次激活时间">${fmtT(r.activated_at)}</span>` : '<span class="dim">—</span>'}</td>
+      <td>${r.expire_at ? `<span title="两台设备共享此到期时间">${fmtT(r.expire_at)}</span>` : r.activated_at && !redeemed ? '<span class="tag ok">终身</span>' : '<span class="dim">—</span>'}</td>
+      <td>${redeemed ? `<span title="${fmtT(r.redeemed_at)}">续至 <code>${esc(r.redeemed_to || "—")}</code></span>` : '<span class="dim">—</span>'}</td>
       <td>${r.devices.length ? r.devices.map(dev =>
-          `<span class="chip"><code style="font-size:11px">${esc(dev.slice(0,12))}${dev.length > 12 ? '…' : ''}</code><span class="x" title="解绑此设备" onclick="unbindDev('${esc(r.code)}','${esc(dev)}')">✕</span></span>`).join("")
+          `<span class="chip"><code style="font-size:11px">${esc(dev.slice(0,12))}${dev.length > 12 ? '…' : ''}</code>${redeemed ? '' : `<span class="x" title="解绑此设备" onclick="unbindDev('${esc(r.code)}','${esc(dev)}')">✕</span>`}</span>`).join("")
         : '<span class="dim">未绑定</span>'}</td>
-      <td class="dim lbl">${esc(r.note || "")}</td>
-      <td title="创建 ${fmtT(r.created_at)}">${fmtT(r.updated_at)}</td>
+      <td title="创建 ${fmtT(r.created_at)}${r.note ? ` · ${esc(r.note)}` : ''}">${fmtT(r.updated_at)}</td>
       ${withOps ? `<td style="white-space:nowrap">
         <button class="ghost mini" onclick="copyCode('${esc(r.code)}')">复制</button>
-        ${r.status === "banned"
+        ${redeemed ? "" : `${r.status === "banned"
           ? ` <button class="ghost mini" style="color:var(--ok)" onclick="setStatus('${esc(r.code)}','active')">解封</button>`
           : ` <button class="ghost mini" style="color:var(--bad)" onclick="setStatus('${esc(r.code)}','banned')">封禁</button>`}
         ${!r.devices.length && r.status !== "banned"
@@ -917,8 +922,9 @@ function ledgerTable(rows, withOps, fixed, stateId) {
               ? ` <button class="ghost mini" onclick="markSold('${esc(r.code)}',false)">取消出售</button>`
               : ` <button class="ghost mini" style="color:var(--amber)" onclick="markSold('${esc(r.code)}',true)">出售</button>`)
           : ""}
-        ${r.devices.length ? ` <button class="ghost mini" style="color:var(--amber)" onclick="unbindAll('${esc(r.code)}',${r.devices.length})">解绑全部</button>` : ""}
-      </td>` : ""}</tr>`).join("") + "</table>";
+        ${r.devices.length ? ` <button class="ghost mini" style="color:var(--amber)" onclick="unbindAll('${esc(r.code)}',${r.devices.length})">解绑全部</button>` : ""}`}
+      </td>` : ""}</tr>`;
+    }).join("") + "</table>";
 }
 
 /* ---- 卡密 ----
@@ -1769,6 +1775,7 @@ async function iptvAutoRun() {
 let vodSourceRows = [], vodSourceEditId = null, vodSourceTestRow = null, vodSourceHls = null;
 function vodRows(payload) {
   if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.drafts)) return payload.drafts;
   if (Array.isArray(payload.rows)) return payload.rows;
   if (Array.isArray(payload.sources)) return payload.sources;
   return [];
@@ -1782,7 +1789,7 @@ async function loadVodSources() {
     return;
   }
   vodSourceRows = vodRows(d);
-  document.getElementById("vod-source-version").textContent = `草稿 ${vodSourceRows.length} 个源 · 已发布 v${d.published_version || d.version || 0}`;
+  document.getElementById("vod-source-version").textContent = `草稿 ${vodSourceRows.length} 个源 · 已发布 v${d.published_version || d.publishedVersion || d.version || 0}`;
   document.getElementById("vod-source-draft-state").style.display = d.dirty === false ? "none" : "inline-block";
   if (!vodSourceRows.length) { table.innerHTML = '<div class="empty">暂无影视源，可从网站识别或手动新增。</div>'; return; }
   table.innerHTML = `<table class="grid"><tr><th>顺序</th><th>名称</th><th>网站 / 接口</th><th>适配器</th><th>状态</th><th>操作</th></tr>` +

@@ -34,6 +34,18 @@ class VodSourceAdminContractTest(unittest.TestCase):
         self.assertIn("未发布变更", html)
         self.assertIn("立即推送", html)
 
+    def test_admin_reads_drafts_payload_returned_by_rpc(self):
+        html = ADMIN_HTML.read_text(encoding="utf-8")
+        self.assertIn("payload.drafts", html)
+        self.assertIn("publishedVersion", html)
+
+    def test_admin_bundle_build_includes_vod_source_ui_and_runtime_modules(self):
+        builder = (ROOT / "tools" / "build_admin_function.py").read_text(encoding="utf-8")
+        for name in ("vod_sources.py", "vod_sources.default.json", "hhkan.py"):
+            self.assertIn(name, builder)
+        bundle_html = (ROOT / "cloudfunctions" / "otv-admin" / "admin.html").read_text(encoding="utf-8")
+        self.assertIn('data-tab="vod-sources"', bundle_html)
+
 
 if __name__ == "__main__":
     unittest.main()

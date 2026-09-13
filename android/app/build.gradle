@@ -16,10 +16,9 @@ android {
         // 技术方案 §4.2：坚果 N1 Air = Bonfire OS / Android 11 → minSdk 30，零 GMS 依赖
     minSdk 30
     targetSdk 34
-    // v1.24（2026-09-11 第四批优化）：海报/筛选提速、TV 投屏全删、播放器侧栏光标
-    // 修复 + 换源全源展示、我的页会员行改版
-    versionCode 26
-    versionName "1.24"
+    // v1.25（2026-09-13）：授权协议 v2，统一到期时间与 24 小时网络宽限
+    versionCode 27
+    versionName "1.25"
         // 方案 §5：双 ABI split 思路——真机 arm64/v7a + 模拟器 x86_64（开发验证用）
         ndk { abiFilters "arm64-v8a", "armeabi-v7a", "x86_64" }
         // AOSP 谷歌拼音解码器（搜索页拼音候选，2026-08-29）；默认 c++_static（new/delete 需要 libc++）

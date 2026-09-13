@@ -1,14 +1,15 @@
-// OptimalTV v1.17 激活端点（公测版）——CloudBase HTTP 云函数
+// OptimalTV 授权协议 v2 端点——CloudBase HTTP 云函数
 //
-// 入参: POST /  { code, deviceId }
-// 出参: { ret: 0, ticket } 或 { ret: 40x, msg }
+// 入参: POST /  { protocol: 2, action, code, deviceId, currentCode? }
+// 出参: { ret: 0, ticket, licenseCode, activatedAt, expireAt, serverNow }
+//       或 { ret: 40x/50x, msg }
 //
 // 设计（方案文档 §3.2 + 实施修订）：
 // - 函数内无签名能力、无长期密钥：PG 访问凭据 = svc_activate 服务账号
 //   （env 注入），signin 换 2h access_token 内存缓存；账号被吊销/改密即断供。
-// - PG 侧 activate_code RPC（SECURITY DEFINER）承担查表+行锁+设备绑定+审计，
+// - PG 侧 activate_code RPC（SECURITY DEFINER）承担查表+行锁+激活/校验/续费，
 //   本函数只做参数校验与转发——云端被黑伪造不了新授权（票据由本机私钥预签名）。
-// - 码格式 OTV-XXXXX-XXXXX（字母表剔除 0/O/1/I），deviceId 为 ANDROID_ID+机型哈希。
+// - 码格式 OTV-XXXXX-XXXXX（字母表剔除 0/O/1/I），deviceId 为完整 SHA-256。
 const http = require("http");
 const { URL } = require("url");
 
@@ -64,10 +65,20 @@ const server = http.createServer(async (req, res) => {
   }
   const body = await readJsonBody(req);
   if (body === null) return sendJson(res, { ret: 400, msg: "bad_json" });
+  const protocol = Number(body.protocol || 0);
+  const action = String(body.action || "").trim().toLowerCase();
   const code = String(body.code || "").trim().toUpperCase();
-  const deviceId = String(body.deviceId || "").trim();
+  const currentCode = String(body.currentCode || "").trim().toUpperCase();
+  const deviceId = String(body.deviceId || "").trim().toLowerCase();
+  const actions = ["activate", "verify", "renew"];
+  if (protocol !== 2) return sendJson(res, { ret: 426, msg: "upgrade_required" });
+  if (!actions.includes(action)) return sendJson(res, { ret: 400, msg: "bad_action" });
   if (!/^OTV-[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/.test(code)) return sendJson(res, { ret: 400, msg: "bad_code" });
-  if (!/^[A-Za-z0-9_-]{8,64}$/.test(deviceId)) return sendJson(res, { ret: 400, msg: "bad_device" });
+  if (!/^[a-f0-9]{64}$/.test(deviceId)) return sendJson(res, { ret: 400, msg: "bad_device" });
+  if (action === "renew" &&
+      (!/^OTV-[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/.test(currentCode) || currentCode === code)) {
+    return sendJson(res, { ret: 400, msg: "bad_current_code" });
+  }
   const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || null;
 
   try {
@@ -75,7 +86,14 @@ const server = http.createServer(async (req, res) => {
     const r = await fetch(`${HOST}/v1/rdb/rest/rpc/activate_code`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + tok },
-      body: JSON.stringify({ p_code: code, p_device: deviceId, p_ip: ip }),
+      body: JSON.stringify({
+        p_protocol: protocol,
+        p_action: action,
+        p_code: code,
+        p_device: deviceId,
+        p_current_code: action === "renew" ? currentCode : null,
+        p_ip: ip,
+      }),
     });
     const text = await r.text();
     let data;

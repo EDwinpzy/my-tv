@@ -278,6 +278,7 @@ table.pool tr:not(.miss):hover td{background:rgba(255,255,255,.05)}
   <button data-tab="ann"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.75 6.25v3.5h2.4l4.1 3.1V3.15l-4.1 3.1z"/><path d="M11.75 5.75a3.6 3.6 0 0 1 0 4.5"/></svg>公告</button>
   <div class="rail-grp">渠道</div>
   <button data-tab="iptv"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.5"/><path d="M8 11.25V13.5M5.5 13.5h5"/></svg>电视源</button>
+  <button data-tab="vod-sources"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5h12v8H2z"/><path d="m6.5 7 3 1.5-3 1.5zM5 2.5l3 2 3-2"/></svg>影视源</button>
   <div class="rail-foot" id="verbs-note">私钥签发 · 白名单 RPC<br>登录会话 12h</div>
 </nav>
 
@@ -312,7 +313,7 @@ table.pool tr:not(.miss):hover td{background:rgba(255,255,255,.05)}
       <option value="weekly">周卡</option>
     </select>
     <select id="f-status">
-      <option value="">全部状态</option><option value="active">已激活</option><option value="sold">已售未绑定</option><option value="unsold">未售库存</option><option value="banned">已封禁</option>
+      <option value="">全部状态</option><option value="active">已激活</option><option value="redeemed">已用于续费</option><option value="sold">已售未绑定</option><option value="unsold">未售库存</option><option value="banned">已封禁</option>
     </select>
     <button class="act" id="btn-search">查询</button>
     <span class="hint" id="lic-total"></span>
@@ -536,6 +537,30 @@ table.pool tr:not(.miss):hover td{background:rgba(255,255,255,.05)}
   </details>
 </section>
 
+<!-- ============ 影视播放源 ============ -->
+<section id="tab-vod-sources" style="display:none">
+  <div class="w-head">
+    <h1>影视源管理</h1><span class="sub">编辑内容保存为草稿，不会自动影响客户端</span><span class="spring"></span>
+    <button class="act" id="btn-vod-source-publish" onclick="vodSourcePublish()">立即推送</button>
+  </div>
+  <div class="formfoot" style="margin-bottom:18px">
+    <span class="tag warn" id="vod-source-draft-state">未发布变更</span>
+    <span class="hint" id="vod-source-version">加载版本信息…</span>
+  </div>
+  <div class="panel">
+    <div class="secthead"><h2>从网站新增</h2><span class="sub">输入影视网站首页，自动识别 MacCMS JSON/XML 接口</span></div>
+    <div class="toolbar">
+      <input id="vod-source-site-input" class="mono" style="min-width:360px" placeholder="https://example.com">
+      <button class="act" onclick="vodSourceDiscover()">识别并新增</button>
+      <button class="ghost" onclick="vodSourceEdit(null)">手动新增</button>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="secthead"><h2>源列表</h2><span class="sub">当前项目源按配置顺序显示</span><span class="spring"></span><button class="ghost mini" onclick="loadVodSources()">刷新</button></div>
+    <div class="gridwrap" id="vod-source-table"></div>
+  </div>
+</section>
+
 </main>
 
 <!-- ============ 右：运行状态栏（常驻） ============ -->
@@ -623,6 +648,38 @@ table.pool tr:not(.miss):hover td{background:rgba(255,255,255,.05)}
     <video id="ip-video" controls autoplay playsinline style="display:block;width:100%;aspect-ratio:16/9;background:#000;outline:none"></video>
     <div class="errbox" id="ip-err" style="display:none;margin-top:10px"></div>
     <div id="ip-url" style="margin-top:10px;font-family:var(--mono);font-size:11px;color:var(--faint);word-break:break-all"></div>
+  </div>
+</div>
+
+<!-- ============ 影视源编辑浮层 ============ -->
+<div id="vod-source-edit-veil" class="veil" style="display:none;z-index:9" onclick="if(event.target===this)vodSourceEditClose()">
+  <div class="veil-panel wide">
+    <div class="veil-head"><h2 id="vod-source-edit-title">新增影视源</h2><span class="sub">保存到草稿，点“立即推送”后客户端才会更新</span></div>
+    <div class="formgrid" style="padding:0;border:none;background:none">
+      <label class="f">名称<input id="vse-name" placeholder="如 暴风"></label>
+      <label class="f">适配器<select id="vse-adapter"><option value="macms_json">MacCMS JSON</option><option value="macms_xml">MacCMS XML</option><option value="hhkan">好好看</option></select></label>
+      <label class="f wide">网站地址<input id="vse-site" class="mono" placeholder="https://example.com"></label>
+      <label class="f wide">接口地址<input id="vse-api" class="mono" placeholder="https://example.com/api.php/provide/vod/"></label>
+      <label class="f">排序<input id="vse-sort" type="number" value="0" min="0"></label>
+      <label class="f" style="flex-direction:row;align-items:center"><input id="vse-enabled" type="checkbox" checked> 启用</label>
+    </div>
+    <div class="formfoot" style="border:none;background:none;padding-left:0"><button class="act" onclick="vodSourceSave()">保存</button><button class="ghost" onclick="vodSourceEditClose()">取消</button><span class="hint" id="vod-source-edit-error" style="color:var(--bad)"></span></div>
+  </div>
+</div>
+
+<!-- ============ 影视源指定影片测试与试看浮层 ============ -->
+<div id="vod-source-test-veil" class="veil" style="display:none;z-index:10" onclick="if(event.target===this)vodSourceTestClose()">
+  <div class="veil-panel play">
+    <div class="veil-head"><h2 id="vod-source-test-title">测试影视源</h2><span class="sub">只测试当前源，不修改也不发布配置</span></div>
+    <div class="toolbar">
+      <input id="vst-title" placeholder="指定影片名称" style="min-width:230px">
+      <input id="vst-year" placeholder="年份（可选）" size="10">
+      <input id="vst-episode" type="number" value="1" min="1" placeholder="集数" style="width:90px">
+      <button class="act" id="btn-vod-source-test-run" onclick="vodSourceTestRun()">开始测试</button>
+      <button class="ghost" onclick="vodSourceTestClose()">关闭</button>
+    </div>
+    <div id="vod-source-test-result" class="empty">输入片名后开始测试。</div>
+    <video id="vod-source-preview" controls playsinline style="display:none;width:100%;aspect-ratio:16/9;background:#000;margin-top:12px"></video>
   </div>
 </div>
 
@@ -834,25 +891,30 @@ async function loadOvLedger() {
   pulseDiff("ov-ledger", "ov", Object.fromEntries(d.rows.map(r => [r.code, r.status + r.devices.length + (r.sold_at || "")])));
 }
 function ledgerTable(rows, withOps, fixed, stateId) {
-  const cols = fixed ? '<colgroup><col style="width:17.5%"><col style="width:6.5%"><col style="width:12.5%"><col style="width:9.5%"><col style="width:12%"><col style="width:8.5%"><col></colgroup>' : '';
+  const cols = fixed ? '<colgroup><col style="width:17%"><col style="width:6%"><col style="width:9%"><col style="width:10%"><col style="width:10%"><col style="width:12%"><col style="width:12%"><col></colgroup>' : '';
   return `<table class="grid"${fixed ? ' style="table-layout:fixed"' : ''}>` + cols +
-    `<tr>${thSort(stateId, "code", "卡密")}${thSort(stateId, "plan", "套餐")}${thSort(stateId, "status", "状态")}${thSort(stateId, "sold_at", "出售")}${thSort(stateId, "devices", "已绑设备")}${thSort(stateId, "", "备注")}${thSort(stateId, "updated_at", "最近操作")}${withOps ? "<th></th>" : ""}</tr>` +
-    rows.map(r => `<tr data-key="${esc(r.code)}">
+    `<tr>${thSort(stateId, "code", "卡密")}${thSort(stateId, "plan", "套餐")}${thSort(stateId, "status", "状态")}${thSort(stateId, "activated_at", "首次激活")}${thSort(stateId, "expire_at", "统一到期")}${thSort(stateId, "", "续费去向")}${thSort(stateId, "devices", "已绑设备")}${thSort(stateId, "updated_at", "最近操作")}${withOps ? "<th></th>" : ""}</tr>` +
+    rows.map(r => {
+      const redeemed = !!r.redeemed_at;
+      const status = r.status === "banned" ? '<span class="st bad">✕ 封禁</span>'
+        : redeemed ? '<span class="st warn">↗ 已用于续费</span>'
+        : r.activated_at ? '<span class="st ok">● 已激活</span>'
+        : r.sold_at ? '<span class="st warn">◐ 已售未绑</span>'
+        : '<span class="dim">○ 未售</span>';
+      return `<tr data-key="${esc(r.code)}">
       <td>${esc(r.code)}</td>
       <td class="lbl">${PLAN[r.plan] || r.plan}</td>
-      <td>${r.status === "banned" ? '<span class="st bad">✕ 封禁</span>'
-        : r.devices.length ? '<span class="st ok">● 正常</span>'
-        : r.sold_at ? '<span class="st warn">◐ 已售未绑</span>'
-        : '<span class="dim">○ 未售</span>'}</td>
-      <td>${r.sold_at ? `<span title="已售，等待用户激活">${fmtT(r.sold_at)}</span>` : '<span class="dim">—</span>'}</td>
+      <td>${status}</td>
+      <td>${r.activated_at ? `<span title="首次激活时间">${fmtT(r.activated_at)}</span>` : '<span class="dim">—</span>'}</td>
+      <td>${r.expire_at ? `<span title="两台设备共享此到期时间">${fmtT(r.expire_at)}</span>` : r.activated_at && !redeemed ? '<span class="tag ok">终身</span>' : '<span class="dim">—</span>'}</td>
+      <td>${redeemed ? `<span title="${fmtT(r.redeemed_at)}">续至 <code>${esc(r.redeemed_to || "—")}</code></span>` : '<span class="dim">—</span>'}</td>
       <td>${r.devices.length ? r.devices.map(dev =>
-          `<span class="chip"><code style="font-size:11px">${esc(dev.slice(0,12))}${dev.length > 12 ? '…' : ''}</code><span class="x" title="解绑此设备" onclick="unbindDev('${esc(r.code)}','${esc(dev)}')">✕</span></span>`).join("")
+          `<span class="chip"><code style="font-size:11px">${esc(dev.slice(0,12))}${dev.length > 12 ? '…' : ''}</code>${redeemed ? '' : `<span class="x" title="解绑此设备" onclick="unbindDev('${esc(r.code)}','${esc(dev)}')">✕</span>`}</span>`).join("")
         : '<span class="dim">未绑定</span>'}</td>
-      <td class="dim lbl">${esc(r.note || "")}</td>
-      <td title="创建 ${fmtT(r.created_at)}">${fmtT(r.updated_at)}</td>
+      <td title="创建 ${fmtT(r.created_at)}${r.note ? ` · ${esc(r.note)}` : ''}">${fmtT(r.updated_at)}</td>
       ${withOps ? `<td style="white-space:nowrap">
         <button class="ghost mini" onclick="copyCode('${esc(r.code)}')">复制</button>
-        ${r.status === "banned"
+        ${redeemed ? "" : `${r.status === "banned"
           ? ` <button class="ghost mini" style="color:var(--ok)" onclick="setStatus('${esc(r.code)}','active')">解封</button>`
           : ` <button class="ghost mini" style="color:var(--bad)" onclick="setStatus('${esc(r.code)}','banned')">封禁</button>`}
         ${!r.devices.length && r.status !== "banned"
@@ -860,8 +922,9 @@ function ledgerTable(rows, withOps, fixed, stateId) {
               ? ` <button class="ghost mini" onclick="markSold('${esc(r.code)}',false)">取消出售</button>`
               : ` <button class="ghost mini" style="color:var(--amber)" onclick="markSold('${esc(r.code)}',true)">出售</button>`)
           : ""}
-        ${r.devices.length ? ` <button class="ghost mini" style="color:var(--amber)" onclick="unbindAll('${esc(r.code)}',${r.devices.length})">解绑全部</button>` : ""}
-      </td>` : ""}</tr>`).join("") + "</table>";
+        ${r.devices.length ? ` <button class="ghost mini" style="color:var(--amber)" onclick="unbindAll('${esc(r.code)}',${r.devices.length})">解绑全部</button>` : ""}`}
+      </td>` : ""}</tr>`;
+    }).join("") + "</table>";
 }
 
 /* ---- 卡密 ----
@@ -1708,10 +1771,120 @@ async function iptvAutoRun() {
   loadIptvVersions();
 }
 
+/* ---- 影视源草稿、发布与指定影片测试 ---- */
+let vodSourceRows = [], vodSourceEditId = null, vodSourceTestRow = null, vodSourceHls = null;
+function vodRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.drafts)) return payload.drafts;
+  if (Array.isArray(payload.rows)) return payload.rows;
+  if (Array.isArray(payload.sources)) return payload.sources;
+  return [];
+}
+async function loadVodSources() {
+  const table = document.getElementById("vod-source-table");
+  table.innerHTML = skel(5);
+  const d = await api("vod_source_list");
+  if (d.error || (d.ret != null && d.ret !== 0)) {
+    table.innerHTML = `<div class="empty">加载失败：${esc(d.error || d.msg || "未知错误")}</div>`;
+    return;
+  }
+  vodSourceRows = vodRows(d);
+  document.getElementById("vod-source-version").textContent = `草稿 ${vodSourceRows.length} 个源 · 已发布 v${d.published_version || d.publishedVersion || d.version || 0}`;
+  document.getElementById("vod-source-draft-state").style.display = d.dirty === false ? "none" : "inline-block";
+  if (!vodSourceRows.length) { table.innerHTML = '<div class="empty">暂无影视源，可从网站识别或手动新增。</div>'; return; }
+  table.innerHTML = `<table class="grid"><tr><th>顺序</th><th>名称</th><th>网站 / 接口</th><th>适配器</th><th>状态</th><th>操作</th></tr>` +
+    vodSourceRows.map((s, i) => `<tr>
+      <td class="dim">${s.sort_order ?? i}</td><td><b>${esc(s.name)}</b></td>
+      <td class="mono" style="font-size:11px;max-width:380px;word-break:break-all">${esc(s.site_url || "—")}<br><span class="dim">${esc(s.api_url || "—")}</span></td>
+      <td><span class="tag">${esc(s.adapter_type)}</span></td><td>${s.enabled ? '<span class="st ok">启用</span>' : '<span class="dim">停用</span>'}</td>
+      <td><button class="ghost mini" onclick="vodSourceTest(${i})">测试</button> <button class="ghost mini" onclick="vodSourceEdit(${i})">编辑</button> <button class="ghost mini" style="color:var(--bad)" onclick="vodSourceDelete(${i})">删除</button></td>
+    </tr>`).join("") + "</table>";
+}
+function vodSourceEdit(index) {
+  const row = index == null ? {} : vodSourceRows[index];
+  vodSourceEditId = row.id || null;
+  document.getElementById("vod-source-edit-title").textContent = row.id ? `编辑 ${row.name}` : "新增影视源";
+  document.getElementById("vse-name").value = row.name || "";
+  document.getElementById("vse-site").value = row.site_url || "";
+  document.getElementById("vse-api").value = row.api_url || "";
+  document.getElementById("vse-adapter").value = row.adapter_type || "macms_json";
+  document.getElementById("vse-sort").value = row.sort_order ?? vodSourceRows.length;
+  document.getElementById("vse-enabled").checked = row.enabled !== false;
+  document.getElementById("vod-source-edit-error").textContent = "";
+  document.getElementById("vod-source-edit-veil").style.display = "flex";
+}
+function vodSourceEditClose() { document.getElementById("vod-source-edit-veil").style.display = "none"; }
+async function vodSourceSave() {
+  const payload = {id: vodSourceEditId, name: document.getElementById("vse-name").value.trim(), site_url: document.getElementById("vse-site").value.trim(), api_url: document.getElementById("vse-api").value.trim(), adapter_type: document.getElementById("vse-adapter").value, sort_order: +document.getElementById("vse-sort").value || 0, enabled: document.getElementById("vse-enabled").checked};
+  const d = await api("vod_source_save", payload);
+  if (d.error || (d.ret != null && d.ret !== 0)) { document.getElementById("vod-source-edit-error").textContent = d.error || d.msg || "保存失败"; return; }
+  vodSourceEditClose(); toast("影视源草稿已保存，尚未推送"); loadVodSources();
+}
+async function vodSourceDiscover() {
+  const input = document.getElementById("vod-source-site-input"), site = input.value.trim();
+  if (!site) { toast("请输入网站地址", true); return; }
+  const d = await api("vod_source_discover", {site_url: site});
+  if (d.error) { toast("识别失败：" + d.error, true); return; }
+  const s = d.source || {};
+  vodSourceEdit(null);
+  document.getElementById("vse-name").value = s.name || "";
+  document.getElementById("vse-site").value = s.site_url || site;
+  document.getElementById("vse-api").value = s.api_url || "";
+  document.getElementById("vse-adapter").value = s.adapter_type || "macms_json";
+}
+async function vodSourceDelete(index) {
+  const row = vodSourceRows[index];
+  if (!row || !confirm(`删除影视源“${row.name}”？\n删除只进入草稿，点击立即推送后客户端才会移除。`)) return;
+  const d = await api("vod_source_delete", {id: row.id});
+  if (d.error || (d.ret != null && d.ret !== 0)) { toast("删除失败：" + (d.error || d.msg), true); return; }
+  toast("已从草稿删除，尚未推送"); loadVodSources();
+}
+async function vodSourcePublish() {
+  if (!confirm("立即推送当前影视源草稿？\n客户端下次检查配置时会原子更新；推送失败仍使用旧配置。")) return;
+  const btn = document.getElementById("btn-vod-source-publish");
+  btn.disabled = true; btn.textContent = "推送中…";
+  const d = await api("vod_source_publish");
+  btn.disabled = false; btn.textContent = "立即推送";
+  if (d.error || (d.ret != null && d.ret !== 0)) { toast("推送失败：" + (d.error || d.msg), true); return; }
+  toast(`影视源 v${d.version || "新版本"} 已推送`); loadVodSources();
+}
+function vodSourceTest(index) {
+  vodSourceTestRow = vodSourceRows[index];
+  document.getElementById("vod-source-test-title").textContent = `测试 ${vodSourceTestRow.name}`;
+  document.getElementById("vod-source-test-result").innerHTML = "输入片名后开始测试。";
+  document.getElementById("vod-source-test-veil").style.display = "flex";
+}
+function vodSourceTestClose() {
+  const video = document.getElementById("vod-source-preview");
+  if (vodSourceHls) { vodSourceHls.destroy(); vodSourceHls = null; }
+  video.pause(); video.removeAttribute("src"); video.load(); video.style.display = "none";
+  document.getElementById("vod-source-test-veil").style.display = "none";
+}
+function vodSourcePreview(url) {
+  const video = document.getElementById("vod-source-preview");
+  video.style.display = "block";
+  if (vodSourceHls) vodSourceHls.destroy();
+  if (window.Hls && Hls.isSupported() && /\.m3u8(?:$|\?)/i.test(url)) { vodSourceHls = new Hls(); vodSourceHls.loadSource(url); vodSourceHls.attachMedia(video); }
+  else video.src = url;
+  video.play().catch(() => {});
+}
+async function vodSourceTestRun() {
+  const title = document.getElementById("vst-title").value.trim();
+  if (!title) { toast("请输入影片名称", true); return; }
+  const btn = document.getElementById("btn-vod-source-test-run"), result = document.getElementById("vod-source-test-result");
+  btn.disabled = true; btn.textContent = "测试中…"; result.innerHTML = "正在搜索并解析该源…";
+  const d = await api("vod_source_test", {source: vodSourceTestRow, title, year: document.getElementById("vst-year").value.trim(), episode: +document.getElementById("vst-episode").value || 1});
+  btn.disabled = false; btn.textContent = "开始测试";
+  if (d.error) { result.innerHTML = `<span class="st bad">不可用</span> · ${esc(d.error)}`; return; }
+  const klass = d.grade === "优秀" || d.grade === "良好" ? "ok" : d.grade === "一般" ? "warn" : "bad";
+  result.innerHTML = `<b class="st ${klass}" style="font-size:18px">${esc(d.grade)}</b> · 综合 ${d.score ?? 0} 分<br><span class="dim">${esc(d.summary || "")}</span>` + (d.preview_url ? '<br><button class="act" style="margin-top:10px" id="btn-vod-preview">试看</button>' : "");
+  if (d.preview_url) document.getElementById("btn-vod-preview").onclick = () => vodSourcePreview(d.preview_url);
+}
+
 /* ---- tab 切换 ---- */
 document.querySelectorAll("nav.verbs button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav.verbs button").forEach(x => x.classList.toggle("on", x === b));
-  ["overview","licenses","logs","gen","hu","ann","iptv"].forEach(t =>
+  ["overview","licenses","logs","gen","hu","ann","iptv","vod-sources"].forEach(t =>
     document.getElementById("tab-" + t).style.display = t === b.dataset.tab ? "" : "none");
   if (b.dataset.tab === "overview") { loadStats(); loadHealth(); loadOvLedger(); }
   if (b.dataset.tab === "licenses") loadList();
@@ -1719,6 +1892,7 @@ document.querySelectorAll("nav.verbs button").forEach(b => b.onclick = () => {
   if (b.dataset.tab === "hu") loadHu();
   if (b.dataset.tab === "ann") loadAnn();
   if (b.dataset.tab === "iptv") { loadIptv(); loadIptvVersions(); loadIptvLogs(); iptvGroupLoad(); }
+  if (b.dataset.tab === "vod-sources") loadVodSources();
 });
 document.getElementById("btn-search").onclick = () => { page = 0; loadList(); };
 document.getElementById("q").onkeydown = e => { if (e.key === "Enter") { page = 0; loadList(); } };
@@ -1734,7 +1908,7 @@ loadHealth();
 loadOvLedger();
 /* hash 深链：#licenses 直开对应标签页 */
 const h = location.hash.slice(1);
-if (["overview","licenses","logs","gen","hu","ann","iptv"].includes(h) && h !== "overview")
+if (["overview","licenses","logs","gen","hu","ann","iptv","vod-sources"].includes(h) && h !== "overview")
   document.querySelector(`nav.verbs button[data-tab="${h}"]`).click();
 </script>
 <!-- v1.22 试播浮层用：与网页版同版本 hls.js；加载失败时退回 video 原生 HLS（Safari） -->

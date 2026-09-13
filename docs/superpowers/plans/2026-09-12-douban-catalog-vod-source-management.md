@@ -718,9 +718,9 @@ Expected: no horizontal overflow; filters remain usable by touch; cards remain t
 - Modify: `tools/build_web_function.py`
 - Modify: `tools/build_hhkan_snapshot.py`
 - Modify: `tools/admin_server.py` (`HU_REQUIRED_ENTRIES`)
-- Modify: `docs/项目文档.md`
-- Modify: `docs/版本史.md`
-- Modify: `docs/测试记录.md`
+- Modify: `docs/01-overview/项目文档.md`
+- Modify: `docs/04-records/版本史.md`
+- Modify: `docs/04-records/测试记录.md`
 
 **Interfaces:**
 - Consumes: all prior tasks.
@@ -779,7 +779,7 @@ Use one current sample in each category plus one known unavailable title. From t
 
 - [ ] **Step 6: Update durable documentation and evidence**
 
-Document the new data boundary, `/vod/*` endpoints, source publishing workflow, cache TTLs, matching threshold, ranking weights and rollback behavior in `docs/项目文档.md`. Append the release entry to `docs/版本史.md` and exact commands/devices/screenshots/results to `docs/测试记录.md`.
+Document the new data boundary, `/vod/*` endpoints, source publishing workflow, cache TTLs, matching threshold, ranking weights and rollback behavior in `docs/01-overview/项目文档.md`. Append the release entry to `docs/04-records/版本史.md` and exact commands/devices/screenshots/results to `docs/04-records/测试记录.md`.
 
 - [ ] **Step 7: Build final distributable artifacts without deploying automatically**
 

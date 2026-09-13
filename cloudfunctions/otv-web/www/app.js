@@ -203,15 +203,15 @@ function uiBack() {
 
 function hideBoot() { /* v1.25：启动过渡屏已按需求移除，保留空函数兼容旧调用点 */ }
 
-/* ---------------- 会员系统（卡密激活，契约与 App LicenseManager 一致） ----------------
- * activate 云函数 POST {code, deviceId} → {ret:0, ticket{v,code,plan,days,issued,nonce,sig}}
- * 本地 WebCrypto P-256 验签（canonical "1|code|plan|days|issued|nonce"，DER→P1363）；
- * days=0 终身；续费叠加 max(now, 旧到期)+days；ret=403 封禁 → 本地降级。 */
+/* ---------------- 会员系统（授权协议 v2，与 App LicenseManager 一致） ----------------
+ * PostgreSQL 统一计算 activatedAt/expireAt，Web 只验签并保存服务端结果；
+ * 最近一次成功复验后允许 24 小时网络故障，明确的封禁/无效/解绑立即失效。 */
 /* 激活端点走同源 /api/activate（proxy.py 服务端转发到云端 activate）：
  * 直连云端会被网关 CORS 头合并问题拒收（函数 * + 网关回显 Origin → 非法头），
  * 同源转发在网页版/App 内嵌 webview/本地调试三种形态下都成立 */
 const LICENSE_ENDPOINT = BASE + "/api/activate";
 const LICENSE_REVERIFY_MS = 6 * 60 * 60 * 1000;
+const LICENSE_OFFLINE_GRACE_MS = 24 * 60 * 60 * 1000;
 const PLAN_DAYS = { monthly: 30, quarterly: 90, yearly: 365, lifetime: 0, weekly: 7 };
 const LICENSE_PUBKEY_B64 = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwJd4v53jwXWpinnG1qgVU3D9gM0VvvEFB83Bm/sAEwTcFnISEOJu8DyvyiEW7q9fR9Si7M0afjbMt6k3IOw1hw==";
 function b64bytes(b64) { return Uint8Array.from(atob(b64), c => c.charCodeAt(0)); }
@@ -233,28 +233,79 @@ async function verifyTicketSig(t) {
     return await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, derToP1363(b64bytes(t.sig)), data);
   } catch (e) { return false; }
 }
-function webDeviceId() {
-  let d = store.get("otvw:devid", "");
-  if (!d) {
-    d = (crypto.randomUUID ? crypto.randomUUID() : "w-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10));
-    store.set("otvw:devid", d);
+async function webDeviceId() {
+  let seed = store.get("otvw:deviceSeed", "");
+  if (!seed) {
+    seed = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}-${Math.random()}`;
+    store.set("otvw:deviceSeed", seed);
   }
-  return d;
+  const input = new TextEncoder().encode(`${seed}|${location.origin}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
+  return Array.from(digest, b => b.toString(16).padStart(2, "0")).join("");
 }
 const license = { data: store.get("otvw:ticket", null) };
+function withinLicenseGrace(now) {
+  const last = +store.get("otvw:licenseVerifyAt", 0) || 0;
+  return last > 0 && now >= last && now - last < LICENSE_OFFLINE_GRACE_MS;
+}
+function licenseNow() {
+  const d = license.data;
+  if (!d || !d.server_now || !d.verified_local) return Date.now();
+  return d.server_now + Math.max(0, Date.now() - d.verified_local);
+}
 function isPremium() {
   const d = license.data;
   if (!d) return false;
-  if (d.expiry_at < 0) return true;            /* 终身 */
-  return Date.now() < d.expiry_at;
+  if (!withinLicenseGrace(Date.now())) return false;
+  if (d.expiry_at < 0) return true;
+  return licenseNow() < d.expiry_at;
 }
 function licenseDesc() {
   const d = license.data;
   if (!d) return null;
+  if (!withinLicenseGrace(Date.now())) return { plan: d.plan, text: "需要联网校验会员状态", days: 0, active: false };
   if (d.expiry_at < 0) return { plan: d.plan, text: "终身会员", days: Infinity };
-  const left = Math.max(0, Math.ceil((d.expiry_at - Date.now()) / 86400000));
+  const left = Math.max(0, Math.ceil((d.expiry_at - licenseNow()) / 86400000));
   const dt = new Date(d.expiry_at);
-  return { plan: d.plan, days: left, text: `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")} 到期 · 剩余 ${left} 天` };
+  return { plan: d.plan, days: left, active: left > 0, text: left > 0
+    ? `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")} 到期 · 剩余 ${left} 天`
+    : "会员已到期 · 续费后继续观看" };
+}
+function parseServerMs(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") return value > 1e12 ? value : value * 1000;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+async function licenseRequest(action, code, currentCode) {
+  const payload = { protocol: 2, action: action, code, deviceId: await webDeviceId() };
+  if (action === "renew") payload.currentCode = currentCode;
+  const r = await fetch(LICENSE_ENDPOINT, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return await r.json();
+}
+async function applyLicenseResponse(jo) {
+  if (!jo || jo.ret !== 0 || !jo.ticket || !jo.licenseCode) return false;
+  const t = jo.ticket;
+  const activatedAt = parseServerMs(jo.activatedAt);
+  const serverNow = parseServerMs(jo.serverNow);
+  const expireAt = jo.expireAt == null ? -1 : parseServerMs(jo.expireAt);
+  const shapeOk = t.v === 1 && t.code === jo.licenseCode && PLAN_DAYS[t.plan] === t.days &&
+    String(t.issued).length === 10 && String(t.nonce).length >= 8 && String(t.sig).length >= 64 &&
+    activatedAt != null && serverNow != null && expireAt != null;
+  if (!shapeOk || !await verifyTicketSig(t)) return false;
+  const localNow = Date.now();
+  license.data = {
+    code: jo.licenseCode, plan: t.plan, days: t.days,
+    expiry_at: expireAt, activated_at: activatedAt,
+    server_now: serverNow, verified_local: localNow,
+  };
+  store.set("otvw:ticket", license.data);
+  store.set("otvw:licenseVerifyAt", localNow);
+  renderMemberCard();
+  return true;
 }
 async function activateCode(raw) {
   const code = String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
@@ -262,57 +313,56 @@ async function activateCode(raw) {
     return { ok: false, msg: "卡密格式不正确（OTV-XXXXX-XXXXX）" };
   let jo = null;
   try {
-    const r = await fetch(LICENSE_ENDPOINT, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code, deviceId: webDeviceId() }),
-    });
-    jo = await r.json();
+    const current = license.data;
+    const action = current && current.code !== code ? "renew" : "activate";
+    jo = await licenseRequest(action, code, current ? current.code : null);
   } catch (e) { return { ok: false, msg: "网络不可用，请稍后重试" }; }
   if (jo && jo.ret === 0 && jo.ticket) {
-    const t = jo.ticket;
-    const shapeOk = t.v === 1 && t.code === code && PLAN_DAYS[t.plan] === t.days &&
-      String(t.issued).length === 10 && String(t.nonce).length >= 8 && String(t.sig).length >= 64;
-    if (shapeOk && await verifyTicketSig(t)) {
-      const prev = license.data && license.data.code === t.code ? license.data : null;
-      const now = Date.now();
-      const expiry = t.days === 0 ? -1
-        : Math.max(now, prev && prev.expiry_at > 0 ? prev.expiry_at : 0) + t.days * 86400000;
-      license.data = { code: t.code, plan: t.plan, days: t.days, expiry_at: expiry, activated_at: prev ? prev.activated_at : now };
-      store.set("otvw:ticket", license.data);
-      store.set("otvw:licenseVerifyAt", now);
-      renderMemberCard();
-      return { ok: true };
-    }
+    if (await applyLicenseResponse(jo)) return { ok: true };
     return { ok: false, msg: "票据校验失败，请重试" };
   }
   if (jo && jo.ret === 404) return { ok: false, msg: "卡密不存在，请检查输入" };
   if (jo && jo.ret === 403) return { ok: false, msg: "卡密已被封禁" };
+  if (jo && jo.ret === 402) return { ok: false, msg: "该卡密绑定设备数已满（一码 2 台）" };
+  if (jo && jo.ret === 409) return { ok: false, msg: "该续费卡已使用" };
+  if (jo && jo.ret === 410) return { ok: false, msg: "终身会员无需续费" };
+  if (jo && jo.ret === 426) return { ok: false, msg: "当前版本过旧，请更新后重试" };
   if (jo && jo.ret === 400) return { ok: false, msg: "卡密格式不正确（OTV-XXXXX-XXXXX）" };
   return { ok: false, msg: `激活失败（${jo && jo.ret != null ? jo.ret : "网络"}），请稍后重试` };
 }
-/* 启动静默复验（App §4.3 语义）：封禁降级；断网忽略 */
-async function licenseReverify() {
+/* 成功复验刷新 24h 窗口；网络/5xx 保留旧时间，满 24h 后播放门控自动暂停。 */
+let licenseVerifyPromise = null;
+function licenseReverify() {
+  if (licenseVerifyPromise) return licenseVerifyPromise;
+  licenseVerifyPromise = doLicenseReverify().finally(() => { licenseVerifyPromise = null; });
+  return licenseVerifyPromise;
+}
+async function doLicenseReverify() {
   const d = license.data;
   if (!d) return;
   /* PostgreSQL CU 降耗：静默吊销复验最多每 6 小时一次；显式激活不受影响。 */
   const last = +store.get("otvw:licenseVerifyAt", 0) || 0;
   if (Date.now() - last < LICENSE_REVERIFY_MS) return;
   try {
-    const r = await fetch(LICENSE_ENDPOINT, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: d.code, deviceId: webDeviceId() }),
-    });
-    const jo = await r.json();
-    if (jo && jo.ret === 403) {
-      license.data = null; store.set("otvw:ticket", null); renderMemberCard();
-      store.set("otvw:licenseVerifyAt", Date.now());
+    const jo = await licenseRequest("verify", d.code, null);
+    if (jo && [403, 404, 406].includes(jo.ret)) {
+      license.data = null;
+      store.set("otvw:ticket", null);
+      store.set("otvw:licenseVerifyAt", 0);
+      renderMemberCard();
+    } else if (jo && jo.ret === 405) {
+      const expiry = parseServerMs(jo.expireAt) || licenseNow();
+      license.data = { ...d, expiry_at: expiry };
+      store.set("otvw:ticket", license.data);
+      renderMemberCard();
     } else if (jo && jo.ret === 0) {
-      store.set("otvw:licenseVerifyAt", Date.now());
+      await applyLicenseResponse(jo);
     }
   } catch (e) {}
 }
 /* 播放统一门控（App isPremium 同位）：未激活 → 付费墙 */
 function gatePlay(what) {
+  licenseReverify();
   if (isPremium()) return true;
   $("#pwSub").textContent = what ? `开通会员后可观看「${what}」` : "开通会员后可观看全部影视与直播内容";
   $("#pwMsg").textContent = "";
@@ -1696,7 +1746,7 @@ function renderMemberCard() {
           <div class="mc-title">会员${d.days === Infinity ? "" : "· " + planName}</div>
           <div class="mc-sub">${esc(d.text)}</div>
         </div>
-        <div class="mc-badge ok">生效中</div>
+        <div class="mc-badge ${d.active === false ? "" : "ok"}">${d.active === false ? "待校验/续费" : "生效中"}</div>
       </div>
       <div class="mc-code">卡密 ${esc(license.data.code)}</div>`;
   } else {
@@ -2485,3 +2535,7 @@ if (bootHash.startsWith("detail/")) {
 }
 fetch(BASE + "/api/health").then(r => r.ok).catch(() => hint("后端连接异常，部分功能不可用", 3500));
 licenseReverify();
+setInterval(licenseReverify, LICENSE_REVERIFY_MS);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") licenseReverify();
+});

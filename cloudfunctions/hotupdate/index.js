@@ -3,7 +3,7 @@
 // 入参: POST /check  { hotVersion, apkVersion, deviceId }  → { ret, hasUpdate, pkg{...} }
 //       POST /report { deviceId, apkVersion, fromVersion, toVersion, result, detail } → { ret }
 //
-// 设计（docs/_archive-20260906-文档合并/热更新-方案与实施.md（已并入 docs/项目文档.md））：
+// 设计（docs/01-overview/项目文档.md）：
 // - 与 activate 同款骨架：函数内 signin svc_activate 换 2h token 内存缓存，调 PG RPC。
 //   hotupdate_check / hotupdate_report 是公开语义 RPC（grant anon+authenticated，无表直读），
 //   本函数账号即使被攻破也无特权提升——只能查已发布包元数据、写上报日志。

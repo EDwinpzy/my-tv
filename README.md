@@ -26,8 +26,8 @@ My TV 是一款面向电视大屏、手机和平板的原生影视应用，采�
 Android 原生影视应用（TV 大屏 + 手机/平板双端）+ 云端网页版。Kotlin + Jetpack Compose + Media3，
 tvOS 深色风格；Python 后端内嵌进 app（Chaquopy），设备端自给自足。商业化 = 卡密付费（公测版）。
 
-> 📋 **文档总入口**见 **[docs/README.md](docs/README.md)**，详细架构见 **[docs/项目文档.md](docs/项目文档.md)**，
-> 本 README 只做结构介绍与快速上手。
+> 📋 **文档总入口**见 **[docs/README.md](docs/README.md)**；架构看 **[项目文档](docs/01-overview/项目文档.md)**，
+> 构建发布看 **[开发与发布手册](docs/02-guides/开发与发布手册.md)**。本 README 只做结构介绍与快速上手。
 
 ## 快速使用
 
@@ -35,10 +35,13 @@ tvOS 深色风格；Python 后端内嵌进 app（Chaquopy），设备端自给�
 |---|---|
 | 用网页版 | 手机浏览器打开 https://appletv-d5ge1bth794873f76.service.tcloudbase.com/web/ （首次「风险提醒」点确定即过） |
 | 进后台管理 | https://appletv-d5ge1bth794873f76.service.tcloudbase.com/admin/ · 账号 `admin`，密码 = otv-admin 函数环境变量 `OTV_ADMIN_PASS` |
-| 前后端一起发 | `python tools/release_all.py`（云端 /web/ 即时生效 + App 热更 zip 含 www 前端）→ 后台「热更新」页点**「上传最新版本」**（首次点击选 zip 输出目录，之后一键直传；版本号系统自动分配）→ 选发布方式 |
+| 本地构建后端与网页 | `python tools/release_all.py`（默认只在本机生成部署包和 App 热更新包，不触碰公网） |
+| 部署/推送 | 用户明确确认范围后，运行 `python tools/release_all.py --deploy` 部署网页版，再到后台「热更新」页上传/发布；APK 分发另行确认 |
 | 发新 APK | `android/` 或 `internal/mobile/` 下 `./gradlew assembleRelease`（v1.19 起双 flavor 退役，单线发布），产物自动归档到 `apk/` |
-| 签发卡密 | `python tools/license_gen.py gen --plan <套餐> --count <数量>` → `python tools/db_import.py out/<批次>` |
-| 验证改动 | MuMu 模拟器实测（截图 + logcat tag `OTV`），记录进 `docs/测试记录.md`；网页版改动**必须浏览器实测** |
+| 签发卡密 | `python tools/license_gen.py gen --plan <套餐> --count <数量>` → `python tools/db_import.py out/<批次>`；协议迁移/存量重置见 `tools/license_v2_*.sql` 与 `tools/license_v2_reset.py` |
+| 验证改动 | MuMu 模拟器实测（截图 + logcat tag `OTV`），记录进 `docs/04-records/测试记录.md`；网页版改动**必须浏览器实测** |
+
+发布边界：所有任务先在本机完成构建、验证并报告产物；部署云函数、上传/发布热更新、分发 APK、远程 Git push 等外部动作，必须单独经过用户明确确认（G3）后执行。
 
 ## 目录结构
 
@@ -66,9 +69,12 @@ My TV/
 │   └── otv-web/              # 网页版（含 www/ 前端；源码 tools/backend-src/）
 ├── tools/                    # 构建/运维脚本 + 后台 UI 源码（admin.html/admin_server.py）+ SQL 迁移
 ├── docs/
-│   ├── 项目文档.md           # ★ 唯一详细项目文档（架构/模块/云端/部署/运维/安全）
-│   ├── 版本史.md             # 逐版本变更流水（追加式）
-│   └── 测试记录.md           # MuMu 验收记录流水（追加式）
+│   ├── README.md             # 文档总入口
+│   ├── 01-overview/          # 当前架构与项目现状
+│   ├── 02-guides/            # 开发、发布和云端操作指南
+│   ├── 04-records/           # 版本史与测试记录
+│   ├── superpowers/          # 设计规格与实施计划
+│   └── assets/               # 文档截图和展示素材
 └── apk/                      # 构建产物（TV版/ 移动版/ 归档-旧版/）
 ```
 
@@ -80,5 +86,5 @@ My TV/
 
 ## 当前版本
 
-TV / 移动 APK **v1.24**（versionCode 26）· 网页版 **v1.25** · 热更 **v10**（已发布）。逐版本变更与实测证据见
-`docs/版本史.md` 与 `docs/测试记录.md`。
+TV / 移动 APK **v1.25**（versionCode 27）· 网页版 **v1.25** · 热更 **v14**（已发布）。逐版本变更与实测证据见
+`docs/04-records/版本史.md` 与 `docs/04-records/测试记录.md`。

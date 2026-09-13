@@ -166,9 +166,9 @@
 
 **Files:**
 - Modify: `README.md`
-- Modify: `docs/项目文档.md`
-- Modify: `docs/版本史.md`
-- Modify: `docs/测试记录.md`
+- Modify: `docs/01-overview/项目文档.md`
+- Modify: `docs/04-records/版本史.md`
+- Modify: `docs/04-records/测试记录.md`
 - Create: `docs/README.md`
 - Modify: `.gitignore`
 
