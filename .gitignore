@@ -23,6 +23,7 @@ img_cache/
 .v2c/
 .video_agent/
 .learnings/
+.worktrees/
 tools/keys/
 *.whl
 
