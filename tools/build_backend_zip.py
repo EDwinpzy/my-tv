@@ -32,6 +32,22 @@ REPL = ["proxy.py", "hhkan.py", "hhkan_snapshot.py", "hhkan_snapshot.json",
 WWW_FILES = ["index.html", "app.js", "style.css", "manifest.webmanifest"]
 WWW_ASSETS_PREFIX = "www/assets/"
 FB_PREFIX = "www/assets/football/"
+# ZIP 条目时间统一固定，确保相同源码重复构建得到相同 SHA-256。
+FIXED_ZIP_TIME = (2026, 1, 1, 0, 0, 0)
+
+
+def write_entry(zout, filename, data, template=None):
+    info = zipfile.ZipInfo(filename, FIXED_ZIP_TIME)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    if template is not None:
+        info.create_system = template.create_system
+        info.external_attr = template.external_attr
+        info.internal_attr = template.internal_attr
+        info.comment = template.comment
+    else:
+        info.create_system = 3
+        info.external_attr = 0o644 << 16
+    zout.writestr(info, data)
 
 
 def main():
@@ -72,16 +88,16 @@ def main():
         base = os.path.basename(item.filename)
         if item.filename in REPL or (base in REPL and "/" not in item.filename):
             data = open(os.path.join(SRC_DIR, base), "rb").read()
-            zout.writestr(item.filename, data)
+            write_entry(zout, item.filename, data, item)
             replaced.append(item.filename)
         elif replace_posters and item.filename.startswith(FB_PREFIX):
             dropped += 1  # 旧海报池整池移除（需求：原来的海报都去掉）
         elif item.filename in www_replace:
             data = open(os.path.join(SRC_DIR, item.filename), "rb").read()
-            zout.writestr(item.filename, data)
+            write_entry(zout, item.filename, data, item)
             replaced.append(item.filename)
         else:
-            zout.writestr(item, zin.read(item.filename))
+            write_entry(zout, item.filename, zin.read(item.filename), item)
     # www_replace 中 zip 里没有的（新文件）也写入
     with zipfile.ZipFile(SRC_ZIP, "r") as zexist:
         existing = set(zexist.namelist())
@@ -89,16 +105,16 @@ def main():
     # 必须显式写入；旧实现只会覆盖既有 REPL 文件。
     for name in REPL:
         if name not in existing:
-            zout.writestr(name, open(os.path.join(SRC_DIR, name), "rb").read())
+            write_entry(zout, name, open(os.path.join(SRC_DIR, name), "rb").read())
             added += 1
     for rel in sorted(www_replace):
         if rel not in existing:
-            zout.writestr(rel, open(os.path.join(SRC_DIR, rel), "rb").read())
+            write_entry(zout, rel, open(os.path.join(SRC_DIR, rel), "rb").read())
             added += 1
     for i, f in enumerate(posters):
         ext = ".jpg" if f.lower().endswith((".jpg", ".jpeg")) else os.path.splitext(f)[1].lower()
         with open(os.path.join(POSTER_DIR, f), "rb") as fh:
-            zout.writestr("%sfb-%02d%s" % (FB_PREFIX, i + 1, ext), fh.read())
+            write_entry(zout, "%sfb-%02d%s" % (FB_PREFIX, i + 1, ext), fh.read())
         added += 1
     zout.close()
     zin.close()
