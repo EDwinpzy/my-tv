@@ -385,9 +385,11 @@ const LEAGUE_FILTERS = [["all", "全部"], ["important", "重要"],
 const TOP5_RE = /^(英超|西甲|意甲|德甲|法甲|中超|足协杯)/;
 const EURO_RE = /欧冠|欧联|欧协|欧罗巴|欧国联|欧会杯/;
 const NAT_RE = /世预赛|欧预赛|欧洲杯|亚洲杯|美洲杯|世界杯|友谊赛|国家队|国联/;
+const POPULAR_TEAMS = ["曼联","曼彻斯特联","曼城","曼彻斯特城","利物浦","阿森纳","切尔西","热刺","托特纳姆热刺","皇家马德里","皇马","巴塞罗那","巴萨","马德里竞技","马竞","拜仁","拜仁慕尼黑","多特蒙德","国际米兰","国米","AC米兰","尤文图斯","巴黎圣日耳曼","那不勒斯","罗马","勒沃库森"];
+function isImportantMatch(m) { return POPULAR_TEAMS.some(t => (m.home || "").includes(t) || (m.away || "").includes(t)) || NAT_RE.test(m.league || ""); }
 function matchLeagueFilter(m, key) {
   if (key === "all") return true;
-  if (key === "important") return TOP5_RE.test(m.league) || EURO_RE.test(m.league) || NAT_RE.test(m.league);
+  if (key === "important") return isImportantMatch(m);
   if (key === "euro") return EURO_RE.test(m.league);
   if (key === "national") return NAT_RE.test(m.league);
   if (key === "中超") return m.league.includes("中超") || m.league.includes("足协杯");
@@ -481,7 +483,20 @@ async function initLive() {
   /* 需求① + v1.23 实时刷新：前台驻留期每 15s 检查，距上次成功刷新 >25s 静默拉取
      （后端 40s 保热 + 30s 缓存 → 开赛约 1 分钟内上屏；旧 20s/60s 要等 2-5 分钟） */
   clearInterval(live.poll);
-  live.poll = setInterval(() => { if (Date.now() - live.lastOk > 25000) refreshLive(true); }, 15000);
+  live.poll = setInterval(() => refreshLive(true), 10000);
+  clearInterval(live.clock);
+  live.clock = setInterval(() => {
+    let changed = false;
+    for (const m of (live.data && live.data.matches) || []) {
+      if (m.status === "finished") continue;
+      const start = matchStartMillis(m); if (start == null) continue;
+      const elapsed = Math.floor((Date.now() - start) / 60000); if (elapsed < 0) continue;
+      const next = elapsed >= 110 ? "finished" : "live";
+      if (m.status !== next) { m.status = next; changed = true; }
+      if (next === "live") m.minute = String(Math.max(0, Math.min(90, elapsed <= 45 ? elapsed : elapsed <= 60 ? 45 : elapsed - 15)));
+    }
+    if (changed) renderLive();
+  }, 1000);
 }
 async function refreshLive(silent) {
   if (live.refreshing) return;
@@ -576,16 +591,9 @@ function renderLive() {
           + rows.map(r => `<div class="today-grid-row">${r.map(gameCard).join("")}</div>`).join("")
           + `</div>`;
       } else {
-        const cap = Math.max(2, Math.floor((state.base - 2 * sp + 40) / (320 + 40)));
-        if (g.length > cap) {
-          const half = Math.ceil(g.length / 2);
-          const rows = [g.slice(0, half), g.slice(half)];
-          html += `<div style="display:flex;flex-direction:column;gap:28px;overflow-x:auto;padding:24px ${sp}px 40px">`
-            + rows.map(r => `<div style="display:flex;gap:40px;flex:0 0 auto">${r.map(gameCard).join("")}</div>`).join("")
-            + `</div>`;
-        } else {
-          html += `<div class="hscroll" style="gap:40px;padding:24px ${sp}px 40px">${g.map(gameCard).join("")}</div>`;
-        }
+        const pages = Array.from({length: Math.ceil(g.length / 8)}, (_, p) => g.slice(p * 8, p * 8 + 8));
+        html += `<div class="today-pages" style="padding:24px ${sp}px 40px">` + pages.map(page =>
+          `<div class="today-page">${page.map(gameCard).join("")}</div>`).join("") + `</div>`;
       }
     } else {
       html += `<div class="live-grid" id="liveGrid">${g.map(gameCard).join("")}</div>`;
@@ -2044,7 +2052,7 @@ function prefetchPlay(vid, pid, evid) {
 async function resolveVodAndPlay(ctx) {
   try {
     const d = await resolvePlayCached(ctx.vid, ctx.playRef.pid, ctx.playRef.vid);
-    pv.sources = (d.sources || []).map(x => x.url).filter(Boolean);
+    pv.sources = (d.sources || []).filter(x => x && x.url && x.alive !== false).slice(0, 5).map(x => x.url);
     if (!pv.sources.length) throw new Error("未解析到播放地址");
     attachPlayer(relay(pv.sources[0], "none"), ctx.resume || 0);
     pushHistory({ id: ctx.vid, title: ctx.title, cover: ctx.cover || "", epIndex: ctx.epIdx || 0 });
@@ -2323,17 +2331,17 @@ function renderMorePanel() {
   if (showEps) {
     const s = detail.sources[dLineIdx];
     const eps = s ? s.episodes : [];
-    const pageSize = 20, pageCount = Math.ceil(eps.length / pageSize);
+    const pageSize = 10, pageCount = Math.ceil(eps.length / pageSize);
     const page = Math.floor(c.epIdx / pageSize);
-    $("#mpEpPages").innerHTML = pageCount > 1 ? Array.from({ length: pageCount }, (_, p) =>
-      `<button class="epp ${p === page ? "on" : ""}" data-p="${p}">${p * pageSize + 1}-${Math.min((p + 1) * pageSize, eps.length)}</button>`).join("") : "";
+    $("#mpEpPages").innerHTML = eps.length >= 20 ? Array.from({ length: pageCount }, (_, p) =>
+      `<button class="epp ${p === page ? "on" : ""}" data-p="${p}">第${p * pageSize + 1}-${Math.min((p + 1) * pageSize, eps.length)}集</button>`).join("") : "";
     $$("#mpEpPages .epp").forEach(b => b.addEventListener("click", () => {
       dEpPage = +b.dataset.p; dEpIdx = dEpPage * pageSize; renderDetailEps(); startPlayFromCtx();
     }));
     const pageEps = eps.slice(page * pageSize, (page + 1) * pageSize);
     $("#mpEpGrid").innerHTML = pageEps.map((e, i) => {
       const idx = page * pageSize + i;
-      return `<button class="epc ${idx === c.epIdx ? "on" : ""}" data-i="${idx}">${esc(e.ep || "第" + (idx + 1) + "集")}</button>`;
+      return `<button class="epc ${idx === c.epIdx ? "on" : ""}" data-i="${idx}">${idx + 1}</button>`;
     }).join("");
     $$("#mpEpGrid .epc").forEach(b => b.addEventListener("click", () => {
       dEpIdx = +b.dataset.i; dEpPage = Math.floor(dEpIdx / pageSize);
@@ -2344,7 +2352,7 @@ function renderMorePanel() {
   if (c.kind === "vod" && detail && detail.sources.length > 1) {
     $("#mpLinesSec").hidden = false;
     $("#mpLines").innerHTML = detail.sources.slice(0, 5).map((s, i) =>
-      `<button class="lchip ${i === dLineIdx ? "on" : ""}" data-i="${i}">${esc((s.name || "线路" + (i + 1)) + " · " + s.episodes.length + "集")}</button>`).join("");
+      `<button class="lchip ${i === dLineIdx ? "on" : ""}" data-i="${i}">${esc("信号源" + (i + 1))}</button>`).join("");
     $$("#mpLines .lchip").forEach(ch => ch.addEventListener("click", () => {
       dLineIdx = +ch.dataset.i; dEpIdx = 0; renderDetailEps(); startPlayFromCtx(true);
     }));
@@ -2427,8 +2435,8 @@ if ("mediaSession" in navigator) {
         lastTap = 0;
         if (pv.ctx && pv.ctx.kind === "vod") {
           const third = innerWidth / 3;
-          if (e.clientX < third) { pv.video.currentTime = Math.max(0, pv.video.currentTime - 15); hint("快退 15 秒"); }
-          else if (e.clientX > third * 2) { pv.video.currentTime = Math.min(pv.video.duration - 1, pv.video.currentTime + 15); hint("快进 15 秒"); }
+          if (e.clientX < third) { pv.video.currentTime = Math.max(0, pv.video.currentTime - 10); hint("快退 10 秒"); }
+          else if (e.clientX > third * 2) { pv.video.currentTime = Math.min(pv.video.duration - 1, pv.video.currentTime + 10); hint("快进 10 秒"); }
           else { pv.video.paused ? pv.video.play().catch(() => {}) : pv.video.pause(); }
         }
       } else {

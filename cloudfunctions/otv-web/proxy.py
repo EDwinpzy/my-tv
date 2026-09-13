@@ -68,6 +68,34 @@ _cache = {"ts": 0, "data": None, "raw_error": None, "refreshing": False}
 
 _cache_lock = threading.Lock()   # build_api 缓存读写锁：防多线程并发抓源站（弱网下重复慢请求）
 
+
+def project_match_state(item, now=None):
+    """Project cached schedule state against the current Beijing time.
+
+    This makes kickoff transitions exact without waiting for the next origin scrape.
+    Finished matches are terminal and are never reopened by clock projection.
+    """
+    out = dict(item)
+    if out.get("status") == "finished":
+        return out
+    now = now or _now_cn()
+    try:
+        month, day = [int(x) for x in str(out.get("date", "")).split("-")]
+        hour, minute = [int(x) for x in str(out.get("time", "")).split(":")]
+        start = datetime(now.year, month, day, hour, minute)
+    except (TypeError, ValueError):
+        return out
+    elapsed = int((now - start).total_seconds() // 60)
+    if elapsed < 0:
+        return out
+    if elapsed >= 110:
+        out["status"] = "finished"
+        return out
+    out["status"] = "live"
+    played = elapsed if elapsed <= 45 else 45 if elapsed <= 60 else elapsed - 15
+    out["minute"] = str(max(0, min(90, played)))
+    return out
+
 # 测试可替换；生产环境首次访问影视 API 时再初始化，避免启动阶段触网。
 VOD_SERVICE = None
 _VOD_SERVICE_LOCK = threading.Lock()
@@ -355,6 +383,7 @@ def _build_matches_payload(matches):
         if m["league"] not in seen:
             seen[m["league"]] = m["league_color"]
             leagues.append({"name": m["league"], "color": m["league_color"]})
+    matches = [project_match_state(m) for m in matches]
     payload = {
         "fetched_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "source": _active_source["url"],

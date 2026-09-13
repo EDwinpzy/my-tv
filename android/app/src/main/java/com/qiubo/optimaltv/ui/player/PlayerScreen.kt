@@ -105,7 +105,7 @@ import java.net.URLDecoder
 /**
  * 播放页（2026-08-28 复刻 tvOS 播放器，需求 影视#3 / 足球#13/14）：
  * - 影视：OK 呼出菜单（标题+meta / 中央三键组 / 进度条 / 更多钮）；BACK 隐藏菜单；
- *   菜单隐藏时两次返回退出（首次提示）；左右=±30s；更多钮或菜单键 → 右侧悬浮栏（影片信息+选集+换源+倍速+画幅）
+ *   菜单隐藏时两次返回退出（首次提示）；左右=±10s；更多钮或菜单键 → 右侧悬浮栏（影片信息+选集+换源+倍速+画幅）
  * - 足球直播（需求 足球#14）：无任何菜单、无比分板；唯一控件=信号源选择条
  *   （OK/菜单键呼出，左右移动、OK 切换，BACK/5s 自动隐藏）；默认源=bb（原版足球直播2）；
  *   两次返回退出（首次提示）
@@ -487,7 +487,7 @@ private fun VodPlayerOverlay(
             com.qiubo.optimaltv.ui.components.NAV_LEFT, com.qiubo.optimaltv.ui.components.NAV_RIGHT -> {
                 // 需求 影视#8：菜单隐藏时左右快进自动弹出菜单栏
                 if (!ui.controlsVisible) vm.showControls()
-                vm.seekBy(if (dir == com.qiubo.optimaltv.ui.components.NAV_LEFT) -30_000 else +30_000)
+                vm.seekBy(if (dir == com.qiubo.optimaltv.ui.components.NAV_LEFT) -PlaybackPolicy.SEEK_STEP_MS else PlaybackPolicy.SEEK_STEP_MS)
                 onTick(); return true
             }
             com.qiubo.optimaltv.ui.components.NAV_UP, com.qiubo.optimaltv.ui.components.NAV_DOWN -> {
@@ -599,8 +599,8 @@ private fun VodPlayerOverlay(
                             navGroup = CTL_NAV_GROUP,
                             navOverride = { dir ->
                                 when (dir) {
-                                    com.qiubo.optimaltv.ui.components.NAV_LEFT -> { vm.seekBy(-30_000); onTick(); true }
-                                    com.qiubo.optimaltv.ui.components.NAV_RIGHT -> { vm.seekBy(+30_000); onTick(); true }
+                                    com.qiubo.optimaltv.ui.components.NAV_LEFT -> { vm.seekBy(-PlaybackPolicy.SEEK_STEP_MS); onTick(); true }
+                                    com.qiubo.optimaltv.ui.components.NAV_RIGHT -> { vm.seekBy(PlaybackPolicy.SEEK_STEP_MS); onTick(); true }
                                     com.qiubo.optimaltv.ui.components.NAV_UP -> { runCatching { moreFocus.requestFocus() }; onTick(); true }
                                     else -> false
                                 }
@@ -629,8 +629,8 @@ private fun VodPlayerOverlay(
                                     navGroup = CTL_NAV_GROUP,
                                     navOverride = { dir ->
                                         when (dir) {
-                                            com.qiubo.optimaltv.ui.components.NAV_LEFT -> { vm.seekBy(-30_000); onTick(); true }
-                                            com.qiubo.optimaltv.ui.components.NAV_RIGHT -> { vm.seekBy(+30_000); onTick(); true }
+                                            com.qiubo.optimaltv.ui.components.NAV_LEFT -> { vm.seekBy(-PlaybackPolicy.SEEK_STEP_MS); onTick(); true }
+                                            com.qiubo.optimaltv.ui.components.NAV_RIGHT -> { vm.seekBy(PlaybackPolicy.SEEK_STEP_MS); onTick(); true }
                                             com.qiubo.optimaltv.ui.components.NAV_UP -> { runCatching { moreFocus.requestFocus() }; onTick(); true }
                                             else -> false
                                         }
@@ -772,10 +772,10 @@ private fun MorePanel(
             // 含 HD中字/HD国语 这类多版本电影）。分页与详情页同款（每页 20 集）
             if (!ui.isMovie && ui.epCount > 1) {
                 SectionLabel("选集")
-                val pageSize = 20
+                val pageSize = EpisodeMenuPolicy.RANGE_SIZE
                 val pageCount = (ui.epCount + pageSize - 1) / pageSize
                 var page by remember(ui.epIndex / pageSize) { mutableIntStateOf(ui.epIndex / pageSize) }
-                Row(
+                if (EpisodeMenuPolicy.hasRanges(ui.epCount)) Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier
                         .padding(bottom = 10.dp)
@@ -794,7 +794,7 @@ private fun MorePanel(
                                 )
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                         ) {
-                            Text("$from-$to", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                            Text("第$from-${to}集", color = Color.White, style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -819,7 +819,7 @@ private fun MorePanel(
                                 .padding(vertical = 10.dp),
                         ) {
                             Text(
-                                ui.epNames.getOrNull(i)?.takeIf { it.isNotBlank() } ?: "第${i + 1}集",
+                                EpisodeMenuPolicy.episodeLabel(i),
                                 color = Color.White, style = MaterialTheme.typography.labelMedium,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )

@@ -15,9 +15,11 @@ pool 大小由 LiveRepository.posterUrl 同步维护（POSTER_POOL = 36）。
 import os
 import shutil
 import zipfile
+from pathlib import Path
 
-ROOT = r"D:\MyProjects\My TV"
+ROOT = str(Path(__file__).resolve().parent.parent)
 SRC_ZIP = os.path.join(ROOT, r"android\app\src\main\assets\backend\python-backend.zip")
+MOBILE_ZIP = os.path.join(ROOT, r"internal\mobile\app\src\main\assets\backend\python-backend.zip")
 TMP_ZIP = os.path.join(ROOT, r"tools\python-backend-new.zip")
 SRC_DIR = os.path.join(ROOT, r"tools\backend-src")
 POSTER_DIR = r"D:\OneDrive\ZCode\football-posters"
@@ -101,6 +103,7 @@ def main():
     zout.close()
     zin.close()
     shutil.copyfile(TMP_ZIP, SRC_ZIP)
+    shutil.copyfile(TMP_ZIP, MOBILE_ZIP)
     os.remove(TMP_ZIP)
     print("已替换:", replaced[:12], ("…共 %d 项" % len(replaced)) if len(replaced) > 12 else "")
     print("新增 %d 项；旧海报删除 %d 个，新海报写入 %d 个" % (added, dropped, len(posters)))

@@ -241,8 +241,8 @@ fun PlayerScreen(nav: NavController, vodIdArg: String, epIndex: Int, resumeMs: L
                                 if (!ui.isLive) {
                                     val third = size.width / 3f
                                     when {
-                                        off.x < third -> vm.seekBy(-15_000)    // 双击左 1/3：快退 15s
-                                        off.x > third * 2f -> vm.seekBy(15_000) // 双击右 1/3：快进 15s
+                                        off.x < third -> vm.seekBy(-PlaybackPolicy.SEEK_STEP_MS)
+                                        off.x > third * 2f -> vm.seekBy(PlaybackPolicy.SEEK_STEP_MS)
                                         else -> vm.togglePlay()                 // 双击中央：播放/暂停
                                     }
                                     tick++
@@ -813,10 +813,10 @@ private fun MorePanel(
             // 选集（需求⑨修订：电影不显示选集区，电视剧/动漫/短剧保留；分页每页 20 集 4 列）
             if (!ui.isMovie && ui.epCount > 1) {
                 SectionLabel("选集")
-                val pageSize = 20
+                val pageSize = EpisodeMenuPolicy.RANGE_SIZE
                 val pageCount = (ui.epCount + pageSize - 1) / pageSize
                 var page by remember(ui.epIndex / pageSize) { mutableIntStateOf(ui.epIndex / pageSize) }
-                Row(
+                if (EpisodeMenuPolicy.hasRanges(ui.epCount)) Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier
                         .padding(bottom = 10.dp)
@@ -836,7 +836,7 @@ private fun MorePanel(
                                 )
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                         ) {
-                            Text("$from-$to", color = Color.White, style = MaterialTheme.typography.labelMedium)
+                            Text("第$from-${to}集", color = Color.White, style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -860,7 +860,7 @@ private fun MorePanel(
                                 .padding(vertical = 10.dp),
                         ) {
                             Text(
-                                ui.epNames.getOrNull(i)?.takeIf { it.isNotBlank() } ?: "第${i + 1}集",
+                                EpisodeMenuPolicy.episodeLabel(i),
                                 color = Color.White, style = MaterialTheme.typography.labelMedium,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )

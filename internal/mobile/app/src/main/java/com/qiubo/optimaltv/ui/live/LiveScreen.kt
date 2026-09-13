@@ -131,7 +131,12 @@ class LiveViewModel : ViewModel() {
 
     /** 需求①：页面驻留期轮询入口——距上次成功刷新超过 60s 才真正拉取 */
     fun refreshIfStale() {
-        if (System.currentTimeMillis() - lastRefreshAt > 60_000) refresh(silent = true)
+        if (System.currentTimeMillis() - lastRefreshAt >= 9_500) refresh(silent = true)
+    }
+    fun projectClock(now: Long = System.currentTimeMillis()) {
+        val old = _ui.value
+        val next = old.matches.map { MatchClockPolicy.project(it, matchStartMillis(it), now) }
+        if (next != old.matches) _ui.value = old.copy(matches = next)
     }
 
     /** hero 榜（原版 renderLiveHero：今日/明日优先，重要度排序，前 6） */
@@ -208,7 +213,8 @@ fun LiveScreen(nav: NavController, vm: LiveViewModel = viewModel()) {
     // 刷新 >60s 即静默拉取（开赛/比分变化约 1 分钟内上屏）；离开本页自动停止
     LaunchedEffect(Unit) {
         while (true) {
-            delay(20_000)
+            delay(1_000)
+            vm.projectClock()
             vm.refreshIfStale()
         }
     }
@@ -321,28 +327,15 @@ fun LiveScreen(nav: NavController, vm: LiveViewModel = viewModel()) {
                             // 需求⑦：今日比赛横排；2026-09-05 需求④：超一屏宽折两行（均分、
                             // 保持时间顺序），未超出才单行；两行仍超宽时整体横向滚动
                             item(key = "row-$date") {
-                                val todayCapacity = com.qiubo.optimaltv.ui.theme.rememberRowColumns(cardW = 320f, gap = 40f, sidePad = 86f)
-                                val rowSplit = if (ms.size > todayCapacity) {
-                                    val half = (ms.size + 1) / 2
-                                    listOf(ms.take(half), ms.drop(half))
-                                } else listOf(ms)
-                                Column {
-                                    rowSplit.forEachIndexed { ri, rowMs ->
-                                        androidx.compose.runtime.key("today-row-$ri") {
-                                            LazyRow(
-                                                horizontalArrangement = Arrangement.spacedBy(40f.sx(s)),
-                                                contentPadding = PaddingValues(horizontal = (if (portrait) 40f else 86f).sx(s)),
-                                                modifier = Modifier
-                                                    .padding(
-                                                        top = when {
-                                                            ri == 0 -> 24f.sx(s)
-                                                            else -> 28f.sx(s)
-                                                        },
-                                                        bottom = if (ri == rowSplit.lastIndex) 40f.sx(s) else 0f.sx(s),
-                                                    ),
-                                            ) {
-                                                items(rowMs.size, key = { i -> "col-$date-$ri-${rowMs[i].matchId}" }) { i ->
-                                                    GameCard(ms[i], s, onPlay = ::playMatch)
+                                val pages = TodayMatchPager.pages(ms)
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(40f.sx(s)),
+                                    contentPadding = PaddingValues(horizontal = (if (portrait) 40f else 86f).sx(s)),
+                                    modifier = Modifier.padding(top = 24f.sx(s), bottom = 40f.sx(s))) {
+                                    items(pages.size) { pi ->
+                                        Column(verticalArrangement = Arrangement.spacedBy(28f.sx(s))) {
+                                            pages[pi].rows.forEach { row ->
+                                                Row(horizontalArrangement = Arrangement.spacedBy(40f.sx(s))) {
+                                                    row.forEach { GameCard(it, s, onPlay = ::playMatch) }
                                                 }
                                             }
                                         }
@@ -675,7 +668,7 @@ private val NAT_RE = Regex("世预赛|欧预赛|欧洲杯|亚洲杯|美洲杯|�
 /** 原版 filterLeagues 语义：important=五大+欧战国国赛；欧战/国家队为归并类，具体联赛精确匹配 */
 fun matchLeagueFilter(m: MatchItem, key: String): Boolean = when (key) {
     "all" -> true
-    "important" -> TOP5_RE.containsMatchIn(m.league) || EURO_RE.containsMatchIn(m.league) || NAT_RE.containsMatchIn(m.league)
+    "important" -> ImportantTeamPolicy.isImportant(m)
     "euro" -> EURO_RE.containsMatchIn(m.league)
     "national" -> NAT_RE.containsMatchIn(m.league)
     // v1.16：中超 chip = 中超+足协杯（都是中超球队的比赛）；其余具体联赛用 contains

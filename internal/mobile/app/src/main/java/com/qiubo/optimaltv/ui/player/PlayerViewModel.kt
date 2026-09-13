@@ -608,7 +608,7 @@ class PlayerViewModel(
         val effItem = repo.resolveDetail(item.id) ?: item
         currentItem = effItem
         // 线路构建（含 hhkan 懒解析源）：跨源同名线路或站内多线路
-        val lines = repo.resolveLines(effItem, epStart)
+        val lines = VisibleVodLinePolicy.apply(repo.resolveLines(effItem, epStart))
         if (lines.isEmpty()) {
             _ui.value = _ui.value.copy(fatalMsg = "该集没有可用线路", title = effItem.title)
             return
@@ -1140,6 +1140,8 @@ class PlayerViewModel(
         if (idx !in _ui.value.lines.indices || idx == _ui.value.activeLine) return
         // 手动切源 = 用户重选起点：清空换线尝试记录——旧记录会把此前起播过的线路
         // 当「已试过」跳过（实测 bb 失败后跳过此前正常播放的 plu，全线耗尽进错误态）
+        engine.pause()
+        _ui.value = _ui.value.copy(playState = EnginePlayState.BUFFERING)
         triedLines.clear()
         sameLineRetries = 0
         // 需求③（2026-09-07）：直播手动选源 → 持久化，下次进直播默认直选该源
@@ -1417,7 +1419,7 @@ class PlayerViewModel(
         viewModelScope.launch {
             saveProgress(force = true)
             val item = currentItem ?: return@launch
-            val newLines = runCatching { repo.resolveLines(item, ep) }.getOrDefault(cur.lines)
+            val newLines = VisibleVodLinePolicy.apply(runCatching { repo.resolveLines(item, ep) }.getOrDefault(cur.lines))
             startedThisSession = false
             stallRecoveries = 0
             triedLines.clear()

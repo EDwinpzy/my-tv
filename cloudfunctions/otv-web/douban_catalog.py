@@ -87,20 +87,22 @@ def normalize_subject(raw, requested_category="movie"):
         "douban_id": subject_id,
         "title": _text(raw.get("title") or raw.get("name")),
         "original_title": _text(raw.get("original_title") or raw.get("originalName") or raw.get("alternateName")),
-        "aliases": _list(raw.get("aliases")),
+        "aliases": _list(raw.get("aliases") or raw.get("aka")),
         "year": _text(raw.get("year")),
         "category": _category(raw, requested_category),
         "genres": _list(raw.get("genres") or raw.get("genre")),
-        "regions": _list(raw.get("regions")),
+        "regions": _list(raw.get("regions") or raw.get("countries")),
         "season": _integer(raw.get("season"), 0),
         "rating": _number(rating),
         "rating_count": _integer(rating),
-        "summary": _text(raw.get("summary") or raw.get("description")),
+        "summary": _text(raw.get("summary") or raw.get("description") or raw.get("intro")),
         "directors": _list(raw.get("directors") or raw.get("director")),
         "actors": _list(raw.get("actors") or raw.get("actor")),
         "poster_url": _text(poster),
         "backdrop_url": _text(raw.get("backdrop_url")),
-        "release_date": _text(raw.get("release_date") or raw.get("datePublished")),
+        "release_date": _text((raw.get("release_date") or raw.get("pubdate") or raw.get("datePublished") or [""])[0]
+                              if isinstance(raw.get("release_date") or raw.get("pubdate"), list)
+                              else raw.get("release_date") or raw.get("datePublished")),
     }
     if not result["year"] and result["release_date"]:
         result["year"] = result["release_date"][:4]
@@ -110,7 +112,7 @@ def normalize_subject(raw, requested_category="movie"):
 def parse_explore(payload, category="movie"):
     if not isinstance(payload, dict):
         return []
-    rows = payload.get("items") or payload.get("subjects") or payload.get("data") or []
+    rows = payload.get("items") or payload.get("subjects") or payload.get("subject_collection_items") or payload.get("data") or []
     if isinstance(rows, dict):
         rows = rows.get("items") or rows.get("subjects") or []
     return [normalize_subject(row, category) for row in rows if isinstance(row, dict)]
@@ -204,7 +206,8 @@ class DoubanCatalog:
 
     @staticmethod
     def _fetch(url):
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json,text/html"})
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json,text/html",
+                                                       "Referer": "https://m.douban.com/"})
         with urllib.request.urlopen(request, timeout=12) as response:
             body = response.read().decode("utf-8", "replace")
             content_type = response.headers.get("Content-Type", "").lower()
@@ -245,7 +248,8 @@ class DoubanCatalog:
 
     def _explore(self, category, sort):
         base = "tv" if category in ("tv", "anime", "variety", "short") else "movie"
-        query = urllib.parse.urlencode({"type": base, "sort": sort, "page_limit": 20, "page_start": 0})
+        label = {"U": "热门", "T": "最新", "S": "豆瓣高分"}.get(sort, "热门")
+        query = urllib.parse.urlencode({"category": label, "type": "全部", "limit": 20, "start": 0})
         payload = self.fetch("https://m.douban.com/rexxar/api/v2/subject/recent_hot/%s?%s" % (base, query))
         items = parse_explore(payload, base)
         return [item for item in items if category in ("movie", "tv") or item["category"] == category]
@@ -316,8 +320,9 @@ class DoubanCatalog:
 
         def produce():
             base = "tv" if category in ("tv", "anime", "variety", "short") else "movie"
-            query = urllib.parse.urlencode({"type": base, "sort": sort_code, "page_limit": 24,
-                                            "page_start": max(0, int(page) - 1) * 24})
+            label = {"U": "热门", "T": "最新", "S": "豆瓣高分"}.get(sort_code, "热门")
+            query = urllib.parse.urlencode({"category": label, "type": genre or "全部", "limit": 24,
+                                            "start": max(0, int(page) - 1) * 24})
             items = parse_explore(self.fetch("https://m.douban.com/rexxar/api/v2/subject/recent_hot/%s?%s" % (base, query)), base)
             items = [item for item in items if (category in ("movie", "tv") or item["category"] == category)
                      and self._matches(item, genre, region, year, rating)]
@@ -352,10 +357,10 @@ class DoubanCatalog:
         key = "detail:" + douban_id
 
         def produce():
-            source = self.fetch("https://movie.douban.com/subject/%s/" % douban_id)
-            if not isinstance(source, str):
-                raise ValueError("invalid detail response")
-            item = parse_subject_html(source, douban_id)
+            source = self.fetch("https://m.douban.com/rexxar/api/v2/subject/%s" % douban_id)
+            item = normalize_subject(source) if isinstance(source, dict) else parse_subject_html(source, douban_id)
+            if not item.get("title"):
+                raise ValueError("empty Douban detail")
             item["source"] = "douban"
             item["stale"] = False
             return item

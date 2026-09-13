@@ -185,8 +185,18 @@ object EmbeddedBackend {
 
     /** 解压 assets zip 到应用目录（zip 内容变化时自动重新解压），返回目录 */
     private fun extractZipIfNeeded(ctx: Context): File {
-        val zipSize = ctx.assets.open("backend/python-backend.zip").use { it.available().toLong() }
-        return extractZipTo(ctx, ctx.assets.open("backend/python-backend.zip").buffered(), "assets|$zipSize")
+        val assetPath = "backend/python-backend.zip"
+        val digest = ctx.assets.open(assetPath).use { input ->
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                md.update(buffer, 0, read)
+            }
+            md.digest().joinToString("") { "%02x".format(it) }
+        }
+        return extractZipTo(ctx, ctx.assets.open(assetPath).buffered(), "assets|$digest")
     }
 
     /** 通用解压：.extracted 标记记录「源签名」，不一致（换源/升级）就清目录重解压 */

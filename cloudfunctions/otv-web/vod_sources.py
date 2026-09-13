@@ -300,7 +300,8 @@ class MacCmsAdapter:
         self.fetch = fetch or _default_fetch
 
     def search(self, subject):
-        query = urllib.parse.urlencode({"ac": "videolist", "wd": subject.get("title") or ""})
+        # ac=detail 才稳定返回 vod_play_from/vod_play_url；videolist 在不少站点只给摘要。
+        query = urllib.parse.urlencode({"ac": "detail", "wd": subject.get("title") or ""})
         result = self.fetch(self.source.api_url + "?" + query)
         payload = json.loads(result.get("body") or "{}")
         candidates = []

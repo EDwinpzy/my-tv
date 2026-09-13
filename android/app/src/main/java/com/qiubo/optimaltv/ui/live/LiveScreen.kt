@@ -139,12 +139,15 @@ class LiveViewModel : ViewModel() {
         }
     }
 
-    /** 需求①：比赛信息实时刷新——页面在前台期间每 15s 检查一次，距上次成功
-     *  刷新 >25s 即静默拉取；v1.23（2026-09-06 用户报「开赛了不显示/状态时间不准」）：
-     *  旧版 20s tick + 60s 阈值 + 后端 60s 缓存，开赛上屏要 2-5 分钟。现在后端
-     *  40s 保热 + 30s 缓存，前端 15s/25s 轮询 → 开赛约 1 分钟内上屏。离开本页自动停止 */
+    /** 前台每 10 秒静默刷新；后端同时按本机时间投影缓存状态，开球不再等待源站缓存。 */
     fun refreshIfStale() {
-        if (System.currentTimeMillis() - lastRefreshAt > 25_000) refresh(silent = true)
+        if (System.currentTimeMillis() - lastRefreshAt >= 9_500) refresh(silent = true)
+    }
+
+    fun projectClock(nowMillis: Long = System.currentTimeMillis()) {
+        val current = _ui.value
+        val projected = current.matches.map { MatchClockPolicy.project(it, matchStartMillis(it), nowMillis) }
+        if (projected != current.matches) _ui.value = current.copy(matches = projected)
     }
 
     /** hero 榜（原版 renderLiveHero：今日/明日优先，重要度排序，前 6） */
@@ -223,7 +226,8 @@ fun LiveScreen(nav: NavController, vm: LiveViewModel = viewModel()) {
     // 刷新 >60s 即静默拉取（开赛/比分变化约 1 分钟内上屏）；离开本页自动停止
     LaunchedEffect(Unit) {
         while (true) {
-            delay(15_000)
+            delay(1_000)
+            vm.projectClock()
             vm.refreshIfStale()
         }
     }
@@ -407,41 +411,24 @@ fun LiveScreen(nav: NavController, vm: LiveViewModel = viewModel()) {
                             // 每行独立 LazyRow+ProvideNavScrolls（行内滚动互不干扰，几何导航跨行照常）。
                             // 横向留白用 contentPadding（需求 足球#1）：选中环行首/行尾不裁剪。
                             item(key = "row-$date") {
-                                val todayCapacity = 4
-                                val twoRows = ms.size > todayCapacity
-                                val rowSplit = if (twoRows) {
-                                    val half = (ms.size + 1) / 2
-                                    listOf(ms.take(half), ms.drop(half))
-                                } else listOf(ms)
-                                Column {
-                                    rowSplit.forEachIndexed { ri, rowMs ->
-                                        androidx.compose.runtime.key("today-row-$ri") {
-                                        val rowState = rememberLazyListState()
-                                        val rowScroll = remember(rowState) { lazyNavContainer(rowState) }
-                                        ProvideNavScrolls(horizontal = rowScroll) {
-                                            LazyRow(
-                                                state = rowState,
-                                                horizontalArrangement = Arrangement.spacedBy(40f.sx(s)),
-                                                contentPadding = PaddingValues(horizontal = 86f.sx(s)),
-                                                modifier = Modifier
-                                                    .padding(
-                                                        top = when {
-                                                            ri == 0 -> 24f.sx(s)
-                                                            twoRows -> 28f.sx(s)
-                                                            else -> 0f.sx(s)
-                                                        },
-                                                        bottom = if (ri == rowSplit.lastIndex) 40f.sx(s) else 0f.sx(s),
-                                                    ),
-                                            ) {
-                                                items(rowMs.size, key = { i -> "col-$date-$ri-${rowMs[i].matchId}" }) { i ->
-                                                    GameCard(
-                                                        nav, rowMs[i], s, ::playMatch,
-                                                        upToChip = if (ri == 0 && i == 0) upToFilterChip else null,
-                                                        cardReg = cardReg,
-                                                    )
+                                val pages = TodayMatchPager.pages(ms)
+                                val pageState = rememberLazyListState()
+                                val pageScroll = remember(pageState) { lazyNavContainer(pageState) }
+                                ProvideNavScrolls(horizontal = pageScroll) {
+                                    LazyRow(state = pageState, contentPadding = PaddingValues(horizontal = 86f.sx(s)),
+                                        horizontalArrangement = Arrangement.spacedBy(40f.sx(s)), modifier = Modifier.padding(top = 24f.sx(s), bottom = 40f.sx(s))) {
+                                        items(pages.size, key = { "today-page-$date-$it" }) { pi ->
+                                            Column(verticalArrangement = Arrangement.spacedBy(28f.sx(s))) {
+                                                pages[pi].rows.forEachIndexed { ri, row ->
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(40f.sx(s))) {
+                                                        row.forEachIndexed { ci, match ->
+                                                            GameCard(nav, match, s, ::playMatch,
+                                                                upToChip = if (pi == 0 && ri == 0 && ci == 0) upToFilterChip else null,
+                                                                cardReg = cardReg)
+                                                        }
+                                                    }
                                                 }
                                             }
-                                        }
                                         }
                                     }
                                 }
@@ -789,7 +776,7 @@ private val NAT_RE = Regex("世预赛|欧预赛|欧洲杯|亚洲杯|美洲杯|�
 /** 原版 filterLeagues 语义：important=五大+欧战国国赛；欧战/国家队为归并类，具体联赛精确匹配 */
 fun matchLeagueFilter(m: MatchItem, key: String): Boolean = when (key) {
     "all" -> true
-    "important" -> TOP5_RE.containsMatchIn(m.league) || EURO_RE.containsMatchIn(m.league) || NAT_RE.containsMatchIn(m.league)
+    "important" -> ImportantTeamPolicy.isImportant(m)
     "euro" -> EURO_RE.containsMatchIn(m.league)
     "national" -> NAT_RE.containsMatchIn(m.league)
     // v1.16：中超 chip = 中超+足协杯（都是中超球队的比赛，用户需求）；

@@ -157,30 +157,22 @@ object HotUpdateManager {
                     delay(6 * 60 * 60_000L)
                 }
             }
-            var forced: Triple<JSONObject, Int, String>? = null
+            var pending: Triple<JSONObject, Int, String>? = null
             try {
                 // P1 修复（2026-09-04）：12s 超时只包 check 元数据——旧版把强更的
                 // 分钟级下载也包进 withTimeoutOrNull，慢网下载>12s 协程被取消后
                 // runForced 在下载后的首个挂起点中止，_force 永卡「下载X%」阻断屏
                 // 整会话不释放（且 .hotversion 未落盘，重启同版本再卡，循环复现）
-                forced = withTimeoutOrNull(CHECK_TIMEOUT_MS) { checkLatest() }
-                if (forced == null) OtvLog.w("hotupdate: check 超时，本次跳过（不影响进入 app）")
+                pending = withTimeoutOrNull(CHECK_TIMEOUT_MS) { checkLatest() }
             } catch (e: Exception) {
                 OtvLog.w("hotupdate: 检查失败（静默跳过）: ${e.message}")
             }
             // 强更判定已出：先置阻断态再放门闸（防 awaitSettled 在 _force 置位前抢跑）
-            if (forced != null) {
-                _force.value = ForceState.Blocking(forced.second, "准备下载更新包…")
-            }
             checked.value = true
-            if (forced != null) {
-                runCatching { runForced(forced.first, forced.second, forced.third) }
+            if (pending != null) {
+                runCatching { runSilent(pending.first, pending.second, pending.third) }
                     .onFailure {
-                        OtvLog.w("hotupdate: 强更下载异常: ${it.message}")
-                        _force.value = ForceState.Blocking(
-                            forced.second, "下载失败，将不影响本次使用（下次启动重试）")
-                        delay(2500)
-                        _force.value = null
+                        OtvLog.w("hotupdate: 静默更新失败，下次启动重试: ${it.message}")
                     }
             }
         }
@@ -317,22 +309,22 @@ object HotUpdateManager {
 
         val active = activeVersion()
         val poisoned = poisonedVersion()
-        val forced = pkg.optBoolean("forceApply")
-        if (forced && code > maxOf(active, local) && code != poisoned) {
+        if (code > maxOf(active, local) && code != poisoned) {
             return Triple(pkg, code, dev)
         }
         if (code <= local) return null                 // 已暂存过（等下次冷启动生效/已生效）
-        if (code == dismissedVersion()) return null    // 用户已对该版本点过「取消」
+        return Triple(pkg, code, dev)
+    }
 
-        // 非强更：弹窗提案，用户决定是否下载（需求#12/#13）
-        _offer.value = UpdateOffer(
-            version = code,
-            name = pkg.optString("hotVersionName").ifBlank { "v$code" },
-            sizeBytes = expectSize,
-        )
-        OtvLog.i("hotupdate: 发现可选更新 v$code（${pkg.optString("hotVersionName")}，" +
-            "${if (expectSize > 0) "${expectSize / 1048576}MB" else "?"}），等待用户选择")
-        return null
+    private suspend fun runSilent(pkg: JSONObject, code: Int, dev: String) {
+        val ok = downloadStage(code, pkg.optString("url"), pkg.optString("sha256").lowercase(),
+            pkg.optLong("fileSize", 0L))
+        if (!ok) {
+            report(dev, code, "failed", "silent_download")
+            return
+        }
+        OtvLog.i("hotupdate: v$code 已静默校验完成，重启后端资源进程")
+        restartApp()
     }
 
     /** 下载 → 校验 → 暂存（用户确认/强更共用）。失败返回 false（phase 由调用方定）。 */
