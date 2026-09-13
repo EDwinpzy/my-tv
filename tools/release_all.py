@@ -13,6 +13,7 @@
 """
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 
@@ -22,10 +23,8 @@ PY = sys.executable
 
 def run(cmd, cwd, input_text=None):
     print("$", " ".join(cmd) if isinstance(cmd, list) else cmd, f"(cwd={cwd})")
-    r = subprocess.run(cmd, cwd=cwd, input=input_text, encoding="utf-8",
-                       capture_output=True, text=True, shell=False)
-    out = (r.stdout or "") + (r.stderr or "")
-    print(out[-3000:] if len(out) > 3000 else out)
+    # 让子进程直接继承控制台，避免 Windows 上 GBK/UTF-8 混合输出在捕获解码时崩溃。
+    r = subprocess.run(cmd, cwd=cwd, input=input_text, text=True, shell=False)
     return r.returncode == 0
 
 
@@ -46,20 +45,23 @@ def main():
 
     if args.deploy:
         # tcb 部署是交互式（选择 Update with merged config）——回车选默认。
-        ok2 = run(["tcb", "fn", "deploy", "otv-web", "--httpFn", "--dir", ".",
+        tcb = shutil.which("tcb.cmd") or shutil.which("tcb")
+        if not tcb:
+            raise SystemExit("未找到 tcb CLI；请先确认 npm 全局 bin 已加入 PATH")
+        ok2 = run([tcb, "fn", "deploy", "otv-web", "--httpFn", "--dir", ".",
                    "-e", "appletv-d5ge1bth794873f76", "--force"],
                   os.path.join(ROOT, "cloudfunctions", "otv-web"), input_text="\n")
         if not ok2:
             raise SystemExit("tcb 部署 otv-web 失败（可手动: cd cloudfunctions/otv-web && tcb fn deploy otv-web --httpFn --dir . -e appletv-d5ge1bth794873f76 --force）")
     if args.deploy:
-        print("\n✅ 本地交付物已构建\n✅ 云端网页版已部署（/web/ 即时生效）\n"
-              "✅ App 热更包已重建（android/app/src/main/assets/backend/python-backend.zip，含 www 前端）\n"
-              "→ App 热更新仍需到后台手动上传并发布。")
+        print("\n[OK] 本地交付物已构建\n[OK] 云端网页版已部署（/web/ 即时生效）\n"
+              "[OK] App 热更包已重建（android/app/src/main/assets/backend/python-backend.zip，含 www 前端）\n"
+              "-> App 热更新仍需到后台手动上传并发布。")
     else:
-        print("\n✅ 本地交付物已构建\n"
-              "✅ 云端网页版部署包已生成（未部署）\n"
-              "✅ App 热更包已重建（android/app/src/main/assets/backend/python-backend.zip，含 www 前端）\n"
-              "⏸ 未执行部署、上传或推送；获得用户明确确认后再运行 --deploy，并在后台发布热更新。")
+        print("\n[OK] 本地交付物已构建\n"
+              "[OK] 云端网页版部署包已生成（未部署）\n"
+              "[OK] App 热更包已重建（android/app/src/main/assets/backend/python-backend.zip，含 www 前端）\n"
+              "[PAUSED] 未执行部署、上传或推送；获得用户明确确认后再运行 --deploy，并在后台发布热更新。")
 
 
 if __name__ == "__main__":

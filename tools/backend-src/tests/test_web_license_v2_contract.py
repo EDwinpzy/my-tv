@@ -15,6 +15,7 @@ class WebLicenseV2ContractTest(unittest.TestCase):
         self.assertIn('async function webDeviceId()', self.source)
         self.assertIn('crypto.subtle.digest("SHA-256"', self.source)
         self.assertIn('location.origin', self.source)
+        self.assertIn('`${seed}|web|${location.origin}`', self.source)
         self.assertIn('otvw:deviceSeed', self.source)
 
     def test_uses_protocol_two_actions_and_server_expiry(self):

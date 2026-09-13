@@ -184,6 +184,7 @@ class MainActivity : ComponentActivity() {
         // v1.20 热更自动重启：后台完成下载的更新在回前台时立即生效
         com.qiubo.optimaltv.hotupdate.HotUpdateManager.onForegroundChanged(true)
         com.qiubo.optimaltv.announcement.AnnouncementManager.onForegroundChanged(true)
+        com.qiubo.optimaltv.license.LicenseManager.requestReverify()
     }
 
     override fun onPause() {

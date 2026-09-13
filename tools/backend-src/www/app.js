@@ -239,7 +239,7 @@ async function webDeviceId() {
     seed = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}-${Math.random()}`;
     store.set("otvw:deviceSeed", seed);
   }
-  const input = new TextEncoder().encode(`${seed}|${location.origin}`);
+  const input = new TextEncoder().encode(`${seed}|web|${location.origin}`);
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
   return Array.from(digest, b => b.toString(16).padStart(2, "0")).join("");
 }

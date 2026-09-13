@@ -6,6 +6,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "license_v2_migration.sql"
 RESET = ROOT / "license_v2_reset.py"
 RESET_SQL = ROOT / "license_v2_reset.sql"
+PROJECT_ROOT = ROOT.parent
 
 
 class LicenseV2SqlContractTest(unittest.TestCase):
@@ -69,6 +70,18 @@ class LicenseV2ResetContractTest(unittest.TestCase):
         self.assertIn("clear-all-licenses", reset_sql)
         self.assertIn("delete from public.activate_log", reset_sql)
         self.assertIn("delete from public.licenses", reset_sql)
+
+
+class LicenseV2AndroidContractTest(unittest.TestCase):
+    def test_both_apps_reverify_when_returning_to_foreground(self):
+        paths = (
+            PROJECT_ROOT / "android/app/src/main/java/com/qiubo/optimaltv/MainActivity.kt",
+            PROJECT_ROOT / "internal/mobile/app/src/main/java/com/qiubo/optimaltv/MainActivity.kt",
+        )
+        for path in paths:
+            source = path.read_text(encoding="utf-8")
+            resume = source[source.index("override fun onResume()") : source.index("override fun onPause()")]
+            self.assertIn("LicenseManager.requestReverify()", resume, path.as_posix())
 
 
 if __name__ == "__main__":
