@@ -33,9 +33,6 @@ tools/backend-src/.cache/
 # 本机 adb 调试导出（ui dump / 截图清单）
 out-*.xml
 
-# 本机一次性的配置文件副本
-tools/_cloudbaserc.backup.json
-
 # Python caches and virtual environments
 __pycache__/
 *.py[cod]

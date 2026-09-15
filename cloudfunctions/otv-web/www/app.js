@@ -25,8 +25,28 @@ const $ = (s, p) => (p || document).querySelector(s);
 const $$ = (s, p) => Array.from((p || document).querySelectorAll(s));
 
 const BASE = (location.pathname.replace(/\/[^/]*$/, "") || "").replace(/\/+$/, "");
+
+/* 豆瓣图床 img1..img9 同源同路径，但对第三方 Referer 的放行策略不一致：img9 放行，
+   img1/img2/img3 会回 HTML 被浏览器 ORB 拦掉（net::ERR_BLOCKED_BY_ORB），表现为
+   海报整片不出图。统一首选 img9，加载失败再按序轮换其他图床主机，哪个可达用哪个。 */
+const DOUBAN_IMG_HOSTS = ["img9.doubanio.com", "img3.doubanio.com", "img2.doubanio.com", "img1.doubanio.com"];
+const DOUBAN_IMG_RE = /^(https?:\/\/)img\d+\.doubanio\.com/i;
+function doubanImg(u) {
+  return DOUBAN_IMG_RE.test(u) ? u.replace(DOUBAN_IMG_RE, "$1" + DOUBAN_IMG_HOSTS[0]) : u;
+}
+document.addEventListener("error", ev => {
+  const el = ev.target;
+  if (!el || el.tagName !== "IMG") return;
+  const src = el.getAttribute("src") || "";
+  if (!DOUBAN_IMG_RE.test(src)) return;
+  const host = (src.match(/^https?:\/\/([^/]+)/i) || [])[1] || "";
+  const i = DOUBAN_IMG_HOSTS.indexOf(host);
+  const next = DOUBAN_IMG_HOSTS[i < 0 ? 0 : i + 1];
+  if (next) el.src = src.replace(DOUBAN_IMG_RE, "$1" + next);
+}, true);
+
 function img(u) {
-  u = (u || "").trim();
+  u = doubanImg((u || "").trim());
   if (!u || u.startsWith("data:")) return u || "";
   /* 浏览器直接加载 HTTPS 图片不受 CORS 限制。好好看资源 CDN 会拒绝腾讯云出口，
      由访客网络直连既能正常出图，也省掉云函数带宽与执行时间。仅 http 图片继续中继，
