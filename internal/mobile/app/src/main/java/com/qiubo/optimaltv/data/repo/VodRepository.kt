@@ -79,6 +79,13 @@ class VodRepository(
     private val _state = MutableStateFlow(CatalogState(loading = true))
     val state: StateFlow<CatalogState> = _state.asStateFlow()
 
+    /** 详情专用客户端：豆瓣详情要做「多线路测活 + 清晰度/延时综合排序」，冷路径实测
+     *  15～20s（RemoteApiSource.defaultClient 的 10s 读超时会让它整条失败 → 详情页
+     *  「暂无片源/暂无简介」）；这里放宽到 45s，与 HhkanSource 的详情口径一致。 */
+    private val detailClient by lazy {
+        okHttp.newBuilder().readTimeout(45, java.util.concurrent.TimeUnit.SECONDS).build()
+    }
+
     /** 内置后端就绪探测：仅当 base 指向 127.0.0.1/localhost（内置后端冷启动需几秒）时轮询。
      *  v1.23（2026-09-06 进入提速）：轮询挪 IO——okHttp execute() 是同步阻塞调用，
      *  boot() 在 Main dispatcher 直接调用本函数，主线程同步网络在部分 ROM/模拟器上
@@ -456,7 +463,9 @@ class VodRepository(
 
     private suspend fun fetchDetailCached(ref: String): DetailInfo? {
         detailInfoCache[ref]?.let { return it }
-        val d = runCatching { VodApiSource.fetchDetail(settings.current().hhkanBaseUrl, okHttp, ref) }.getOrNull()
+        val d = runCatching { VodApiSource.fetchDetail(settings.current().hhkanBaseUrl, detailClient, ref) }
+            .onFailure { android.util.Log.w("OTV", "fetchDetail 失败 ref=$ref : ${it.message}") }
+            .getOrNull()
             ?: return null
         detailInfoCache[ref] = d
         return d
