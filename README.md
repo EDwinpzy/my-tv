@@ -62,12 +62,13 @@ My TV/
 │       └── cpp/pinyinime/    # AOSP 谷歌拼音解码器（搜索页拼音候选）
 ├── internal/mobile/          # 移动版工程（触屏；data/playback/license 与 TV 版字节级一致，sync_shared.py 监管）
 ├── cloudfunctions/           # CloudBase 云函数（部署包）
-│   │                         #   2026-09-15 起 activate/hotupdate/iptv-rebuild/otv-admin 已迁到
-│   │                         #   自建站点（见同级仓库 MyTV-Cloud），此处留作回滚；仅 otv-web 仍在用
-│   ├── activate/             # 卡密激活（已迁，留作回滚）
-│   ├── hotupdate/            # 热更 check/report + 公告下发（已迁，留作回滚）
+│   │                         #   2026-09-15：后台管理已完整下线（otv-admin 函数删除、/admin 无上游），
+│   │                         #   线上后台在自建站点（见同级仓库 MyTV-Cloud）；activate/hotupdate/
+│   │                         #   iptv-rebuild 仍服务存量设备，待 v1.26 铺开后再下线
+│   ├── activate/             # 卡密激活（已迁自建站点，留作回滚）
+│   ├── hotupdate/            # 热更 check/report + 公告下发（已迁自建站点，留作回滚）
 │   ├── iptv-rebuild/         # 电视源每日 06:30 自动推流（已由 /iptv/refresh 取代）
-│   ├── otv-admin/            # 后台管理（已迁，留作回滚）
+│   ├── otv-admin/            # 旧后台管理（已下线，仅源码参考；不可再视作线上入口）
 │   └── otv-web/              # 网页版（含 www/ 前端；源码 tools/backend-src/）★ 仍在用
 ├── tools/                    # 构建/运维脚本 + 旧后台 UI 源码（admin.html/admin_server.py）+ SQL 迁移
 ├── docs/
