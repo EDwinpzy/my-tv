@@ -27,9 +27,9 @@ android {
         // v1.18 热更新：云端下发内嵌后端 zip，启动时静默检查+预下载，下次冷启动生效
         resValue 'string', 'app_name', 'My TV'
         buildConfigField 'boolean', 'LICENSE_ENABLED', 'true'
-        buildConfigField 'String', 'LICENSE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/activate"'
+        buildConfigField 'String', 'LICENSE_ENDPOINT', '"https://mytv-cloud.pengzhiyuan0724.chatgpt.site/activate"'
         buildConfigField 'boolean', 'HOTUPDATE_ENABLED', 'true'
-        buildConfigField 'String', 'HOTUPDATE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/hotupdate"'
+        buildConfigField 'String', 'HOTUPDATE_ENDPOINT', '"https://mytv-cloud.pengzhiyuan0724.chatgpt.site/hotupdate"'
         // 启动门闸预算：TV 90s（用户要求全加载完再进，遥控场景可等）；App.kt 共享读取。
         // 2026-09-03 事故教训见 mobile 的 30000 注释
         buildConfigField 'long', 'STARTUP_GATE_MS', '90000'

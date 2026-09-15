@@ -33,8 +33,8 @@ tvOS 深色风格；Python 后端内嵌进 app（Chaquopy），设备端自给�
 
 | 我想… | 怎么做 |
 |---|---|
-| 用网页版 | 手机浏览器打开 https://appletv-d5ge1bth794873f76.service.tcloudbase.com/web/ （首次「风险提醒」点确定即过） |
-| 进后台管理 | https://appletv-d5ge1bth794873f76.service.tcloudbase.com/admin/ · 账号 `admin`，密码 = otv-admin 函数环境变量 `OTV_ADMIN_PASS` |
+| 用网页版 | 手机浏览器打开 https://appletv-d5ge1bth794873f76.service.tcloudbase.com/web/ （首次「风险提醒」点确定即过；卡密/电视源接口已指向自建站点） |
+| 进后台管理 | https://mytv-cloud.pengzhiyuan0724.chatgpt.site/ · 账号 `admin`，密码 = 站点环境变量 `OTV_ADMIN_PASS` |
 | 本地构建后端与网页 | `python tools/release_all.py`（默认只在本机生成部署包和 App 热更新包，不触碰公网） |
 | 部署/推送 | 用户明确确认范围后，运行 `python tools/release_all.py --deploy` 部署网页版，再到后台「热更新」页上传/发布；APK 分发另行确认 |
 | 发新 APK | `android/` 或 `internal/mobile/` 下 `./gradlew assembleRelease`（v1.19 起双 flavor 退役，单线发布），产物自动归档到 `apk/` |
@@ -62,12 +62,14 @@ My TV/
 │       └── cpp/pinyinime/    # AOSP 谷歌拼音解码器（搜索页拼音候选）
 ├── internal/mobile/          # 移动版工程（触屏；data/playback/license 与 TV 版字节级一致，sync_shared.py 监管）
 ├── cloudfunctions/           # CloudBase 云函数（部署包）
-│   ├── activate/             # 卡密激活
-│   ├── hotupdate/            # 热更 check/report + 公告下发
-│   ├── iptv-rebuild/         # 电视源每日 06:30 自动推流
-│   ├── otv-admin/            # 后台管理（源码在 tools/，构建脚本打包过来）
-│   └── otv-web/              # 网页版（含 www/ 前端；源码 tools/backend-src/）
-├── tools/                    # 构建/运维脚本 + 后台 UI 源码（admin.html/admin_server.py）+ SQL 迁移
+│   │                         #   2026-09-15 起 activate/hotupdate/iptv-rebuild/otv-admin 已迁到
+│   │                         #   自建站点（见同级仓库 MyTV-Cloud），此处留作回滚；仅 otv-web 仍在用
+│   ├── activate/             # 卡密激活（已迁，留作回滚）
+│   ├── hotupdate/            # 热更 check/report + 公告下发（已迁，留作回滚）
+│   ├── iptv-rebuild/         # 电视源每日 06:30 自动推流（已由 /iptv/refresh 取代）
+│   ├── otv-admin/            # 后台管理（已迁，留作回滚）
+│   └── otv-web/              # 网页版（含 www/ 前端；源码 tools/backend-src/）★ 仍在用
+├── tools/                    # 构建/运维脚本 + 旧后台 UI 源码（admin.html/admin_server.py）+ SQL 迁移
 ├── docs/
 │   ├── README.md             # 文档总入口
 │   ├── 01-overview/          # 当前架构与项目现状
@@ -77,6 +79,10 @@ My TV/
 │   └── assets/               # 文档截图和展示素材
 └── apk/                      # 构建产物（TV版/ 移动版/ 归档-旧版/）
 ```
+
+> 后台管理、卡密激活、热更分发、电视源发布的新实现不在本仓库，见同级仓库
+> **[MyTV-Cloud](../MyTV-Cloud)**（Sites / Cloudflare Worker + D1 + R2）；线上入口
+> https://mytv-cloud.pengzhiyuan0724.chatgpt.site 。
 
 ## 三条铁律
 

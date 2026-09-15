@@ -40,14 +40,14 @@ class IptvRepository(context: Context) {
 
     companion object {
         /** 上游补源地址按序回退（2026-09-03 实测选型）：
-         *  ① 腾讯云每日校验推送产物（cloudfunctions/iptv-rebuild 定时拉上游→逐线测活
-         *     剔死→按测速排序写入 pgstore 公开桶，匿名 GET 直拉——电视#9「每天自动
-         *     推送可用源、删除不可用源」；桶对象与热更包同桶不同前缀 iptv/）；
+         *  ① 站点每日校验推送产物（/iptv/refresh 定时拉上游→逐线测活剔死→按测速排序
+         *     写入对象存储，匿名 GET 直拉——电视#9「每天自动推送可用源、删除不可用源」；
+         *     对象与热更包同桶不同前缀 iptv/）；
          *  ②③ Guovin/iptv-api 每日自动优化列表（gh-proxy / jsdelivr 双镜像，1619 线路，
          *     上游每日 EPG 校验，gh-proxy ~4s / jsdelivr ~1.6s）；
          *  ④⑤ vbskycn/iptv 聚合（原源，gh-proxy 实测 2.7s；raw 直连国内超时仅作兜底）。 */
         val SOURCES = listOf(
-            "https://appletv-d5ge1bth794873f76.api.tcloudbasegateway.com/v1/storages/object/hotupdate/iptv/iptv-latest.m3u",
+            "https://mytv-cloud.pengzhiyuan0724.chatgpt.site/iptv/latest",
             "https://gh-proxy.com/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.m3u",
             "https://cdn.jsdelivr.net/gh/Guovin/iptv-api@gd/output/result.m3u",
             "https://gh-proxy.com/raw.githubusercontent.com/vbskycn/iptv/master/tv/iptv4.m3u",

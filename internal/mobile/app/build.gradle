@@ -29,9 +29,9 @@ android {
         // 卡密门控为正式线标配；热更新与 TV 版共用同一通道（同一后端 zip）
         resValue 'string', 'app_name', 'My TV 移动版'
         buildConfigField 'boolean', 'LICENSE_ENABLED', 'true'
-        buildConfigField 'String', 'LICENSE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/activate"'
+        buildConfigField 'String', 'LICENSE_ENDPOINT', '"https://mytv-cloud.pengzhiyuan0724.chatgpt.site/activate"'
         buildConfigField 'boolean', 'HOTUPDATE_ENABLED', 'true'
-        buildConfigField 'String', 'HOTUPDATE_ENDPOINT', '"https://appletv-d5ge1bth794873f76.service.tcloudbase.com/hotupdate"'
+        buildConfigField 'String', 'HOTUPDATE_ENDPOINT', '"https://mytv-cloud.pengzhiyuan0724.chatgpt.site/hotupdate"'
         // 启动门闸预算（App.kt 共享读取）：移动端 30s——2026-09-03 事故：首装冷缓存下
         // 90s 兜底全跑满（hhkan 冷抓+327 封面预载），用户感知「卡启动屏打不开」；
         // TV 遥控场景可等 90s，移动端 30s 必进主界面，剩余预载转后台继续
