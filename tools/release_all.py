@@ -34,6 +34,12 @@ def main():
                         help="deploy otv-web after the user has explicitly approved the exact scope")
     args = parser.parse_args()
 
+    # 豆瓣快照是云端/离线环境唯一的影视数据来源（首页、详情、本地搜索都靠它）：
+    # 发布前刷新（快照不足 24 小时则自动跳过，避免每次发布都等抓取）。
+    # 抓取被限流时脚本自己会保留旧快照并返回非零码，这里只提示不阻塞。
+    if not run([PY, os.path.join(ROOT, "tools", "build_douban_snapshot.py")], ROOT):
+        print("[WARN] 豆瓣快照未刷新，沿用现有 douban_snapshot.json 继续构建")
+
     ok1 = run([PY, os.path.join(ROOT, "tools", "build_web_function.py")], ROOT)
     if not ok1:
         raise SystemExit("build_web_function 失败")

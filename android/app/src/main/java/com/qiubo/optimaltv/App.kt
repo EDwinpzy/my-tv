@@ -244,6 +244,7 @@ class App : android.app.Application(), ImageLoaderFactory {
             EmbeddedBackend.ensureStarted(this)
             return
         }
+        com.qiubo.optimaltv.lifecycle.AppLifecycleManager.init(this)
         // 直播流解密桥：proxy.py 安卓模式 POST :8091/decrypt，WebView 执行播放器混淆 JS（需求 足球#1）
         com.qiubo.optimaltv.playback.StreamDecryptServer.ensureStarted(this)
         // 拉起 :backend 后端进程（App.onCreate 分叉内自启 python）

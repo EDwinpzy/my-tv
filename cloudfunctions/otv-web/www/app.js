@@ -1324,7 +1324,8 @@ function renderAllFilters() {
     ["cat", "类别", ALL_CATS.map(([c, n]) => [c, n])],
     ["type", "类型", (f.types || []).map(v => [v, v])],
     ["area", "地区", (f.areas || []).map(v => [v, v])],
-    ["year", "年份", (f.years || []).concat(["更早"]).map(v => [v, v])],
+    /* 服务端 years 已含「更早」，这里补兜底后再去重，避免出现两个「更早」chip */
+    ["year", "年份", Array.from(new Set((f.years || []).concat(["更早"]))).map(v => [v, v])],
     ["rating", "评分", (f.ratings || ["全部", "9+", "8+", "7+", "暂无评分"]).map(v => [v, v])],
     ["by", "排序", VOD_SORTS],
   ].filter(([, , values]) => values.length > 0);
@@ -1685,17 +1686,14 @@ async function doSearch(k) {
   search.loading = true;
   renderSearch();
   try {
-    let items = [];
-    /* App：空结果 3s / 6s 两次重试（429 限流自愈） */
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const d = await fetchJSON(BASE + "/hhkan/search?k=" + encodeURIComponent(k), { timeout: 60000 });
-        items = d.items || [];
-      } catch (e) { items = []; }
-      if (seq !== search.seq) return;
-      if (items.length) break;
-      if (attempt < 2) await new Promise(r => setTimeout(r, attempt === 0 ? 3000 : 6000));
-    }
+    const d = await fetchJSON(BASE + "/api/search?q=" + encodeURIComponent(k) + "&limit=60", { timeout: 15000 });
+    const items = (d.items || []).map(it => ({
+      ...it,
+      id: it.id || ("douban:" + it.douban_id),
+      cover: it.poster_url || it.cover || "",
+      categoryId: "douban:" + (it.category || "movie"),
+    }));
+    if (seq !== search.seq) return;
     search.remote = items;
     search.loading = false;
     renderSearch();
@@ -1714,9 +1712,6 @@ function searchInputChanged(explicit) {
     const t = it.title || "";
     return t.includes(k) || k.toLowerCase().split("").every(ch => t.toLowerCase().includes(ch));
   }) : [];
-  /* App：含中文自动搜（450ms 防抖）；纯字母不自动搜——显式搜索键触发 */
-  const hasChinese = [...k].some(ch => /[\u4e00-\u9fff]/.test(ch));
-  if (!hasChinese && !explicit) { renderSearch(); return; }
   if (!explicit && k === search.lastSearched) { renderSearch(); return; }
   renderSearch();
   search.timer = setTimeout(() => { search.lastSearched = k; doSearch(k); }, 450);
@@ -2031,8 +2026,10 @@ function renderTvSidebar() {
 /* ================================================================
  * 播放器（PlayerScreen 复刻：影视 tvOS 控制层 + 直播信号源条 + 手势）
  * ================================================================ */
+const MAX_RECOVERY_ATTEMPTS = 4;
 const pv = { hls: null, video: null, ctx: null, sources: [], srcNames: [], hideTimer: 0, progTimer: 0,
-  speedIdx: 2, pausedAt: -1, controls: false, picker: false };
+  stallTimer: 0, speedIdx: 2, pausedAt: -1, controls: false, picker: false,
+  recoveryGen: 0, recoveryAttempts: 0, recovering: false };
 /* PlayerViewModel.SPEED_STEPS */
 const SPEEDS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
 /* AspectMode：原始 / 裁切填充 / 16:9 / 4:3 */
@@ -2042,6 +2039,7 @@ function openPlayer(ctx) {
   /* 需求②：播放统一门控（App isPremium 同位）——未激活弹付费墙 */
   if (!gatePlay(ctx.title)) return;
   pv.ctx = ctx; pv.srcIdx = 0; pv.speedIdx = 2; pv.pausedAt = -1;
+  pv.recoveryGen++; pv.recoveryAttempts = 0; pv.recovering = false;
   pv.aspectIdx = store.get("otvw:aspect", 0);
   pv.controls = false; pv.picker = false;
   $("#pPlayer").hidden = false; document.body.style.overflow = "hidden";
@@ -2093,6 +2091,10 @@ function resolvePlayCached(vid, pid, evid) {
     .catch(e => { playResolve.map.delete(key); throw e; });
   playResolve.map.set(key, { p });
   return p;
+}
+function bustResolvedPlay(ctx) {
+  if (!ctx || !ctx.playRef) return;
+  playResolve.map.delete(`${ctx.vid}:${ctx.playRef.pid}:${ctx.playRef.vid}`);
 }
 function prefetchPlay(vid, pid, evid) {
   if (pid == null || evid == null) return;
@@ -2168,19 +2170,37 @@ function renderSrcPicker() {
   $("#srcPicker").innerHTML = `<div class="sp-title">信号源</div><div class="sp-chips">` +
     pv.srcNames.map((n, i) =>
       `<button class="spchip ${i === pv.srcIdx ? "on" : ""}" data-i="${i}">${esc(srcLabel(n))}</button>`).join("") + `</div>`;
-  $$("#srcPicker .spchip").forEach(c => c.addEventListener("click", () => {
+  $$("#srcPicker .spchip").forEach(c => c.addEventListener("click", async () => {
     pv.srcIdx = +c.dataset.i;
     /* 需求③：手动选源记忆到 localStorage，下次进直播默认直选 */
     try { localStorage.setItem("liveLastSrc", pv.srcNames[pv.srcIdx] || ""); } catch (e) {}
     renderSrcPicker();
     $("#bufSpin").hidden = false;
-    attachPlayer(relay(pv.sources[pv.srcIdx]), 0);
+    const gen = ++pv.recoveryGen;
+    try {
+      const url = await resolveFreshLiveSource(pv.srcIdx);
+      if (gen === pv.recoveryGen) attachPlayer(relay(url), 0);
+    } catch (e) { if (gen === pv.recoveryGen) recoverPlayback("手动切源失败", gen); }
   }));
   $("#srcPickerWrap").hidden = !pv.picker;
 }
 
+async function resolveFreshLiveSource(index) {
+  const ctx = pv.ctx;
+  if (!ctx || ctx.kind !== "live") throw new Error("not live");
+  const src = pv.srcNames[index];
+  const channel = (ctx.channels || []).find(c => c && c.src === src) || {};
+  const matchId = channel.id || ctx.matchId;
+  const d = await fetchJSON(BASE + `/api/stream/${matchId}?src=${src}&fresh=1`, { timeout: 60000 });
+  if (!d.url) throw new Error(d.error || "no url");
+  pv.sources[index] = d.url;
+  return d.url;
+}
+
 function attachPlayer(url, resume) {
   const v = pv.video, ctx = pv.ctx;
+  const gen = ++pv.recoveryGen;
+  pv.recovering = false;
   $("#bufSpin").hidden = false;
   if (pv.hls) { pv.hls.destroy(); pv.hls = null; }
   v.removeAttribute("src");
@@ -2190,25 +2210,76 @@ function attachPlayer(url, resume) {
     pv.hls = new Hls({ maxBufferLength: 45, maxMaxBufferLength: 90 });
     pv.hls.loadSource(url); pv.hls.attachMedia(v);
     pv.hls.on(Hls.Events.ERROR, (_, d) => {
-      if (!d.fatal) return;
-      if (d.type === Hls.ErrorTypes.NETWORK_ERROR && !String(d.details || "").includes("manifest")) { pv.hls.startLoad(); return; }
-      nextSource();
+      if (!d.fatal || gen !== pv.recoveryGen) return;
+      recoverPlayback(`HLS ${d.type || "error"}/${d.details || "unknown"}`, gen);
     });
-  } else { v.src = url; v.onerror = () => nextSource(); }
+  } else { v.src = url; v.onerror = () => { if (gen === pv.recoveryGen) recoverPlayback("原生播放器错误", gen); }; }
   v.onloadedmetadata = () => {
     $("#bufSpin").hidden = true;
     if (resume > 0 && ctx.kind === "vod" && (!v.duration || resume < v.duration - 30)) {
       v.currentTime = resume; hint("已从 " + fmtTime(resume) + " 继续播放");
     }
   };
-  v.onplaying = () => { $("#bufSpin").hidden = true; setPlayIcon(true); };
+  v.onplaying = () => {
+    if (gen !== pv.recoveryGen) return;
+    pv.recoveryAttempts = 0; pv.recovering = false;
+    $("#bufSpin").hidden = true; setPlayIcon(true);
+  };
   v.onpause = () => setPlayIcon(false);
   v.onended = () => onEnded();
   v.ontimeupdate = updatePb;
   v.play().catch(() => {});
   clearInterval(pv.progTimer);
   pv.progTimer = setInterval(() => saveCurProgress(), 5000);
+  clearInterval(pv.stallTimer);
+  let lastPos = -1, stuckTicks = 0;
+  pv.stallTimer = setInterval(() => {
+    if (gen !== pv.recoveryGen || !pv.ctx || v.paused || v.ended) return;
+    const buffering = v.readyState < 3;
+    stuckTicks = buffering || Math.abs(v.currentTime - lastPos) < 0.05 ? stuckTicks + 1 : 0;
+    lastPos = v.currentTime;
+    if (stuckTicks >= 8) { stuckTicks = 0; recoverPlayback("播放 8 秒无进展", gen); }
+  }, 1000);
   applyAspect();
+}
+
+async function recoverPlayback(reason, expectedGen) {
+  if (!pv.ctx || pv.recovering || (expectedGen != null && expectedGen !== pv.recoveryGen)) return;
+  pv.recovering = true;
+  const attempt = pv.recoveryAttempts++;
+  if (attempt >= MAX_RECOVERY_ATTEMPTS) {
+    pv.recovering = false;
+    playerFatal("播放持续卡顿，自动恢复已达上限");
+    return;
+  }
+  const ctx = pv.ctx;
+  const resume = ctx.kind === "vod" && pv.video ? Math.max(0, pv.video.currentTime - 2) : 0;
+  hint(`正在恢复播放（${attempt + 1}/${MAX_RECOVERY_ATTEMPTS}）`);
+  try {
+    if (ctx.kind === "live") {
+      if (attempt === 1 && pv.sources.length > 1) pv.srcIdx = (pv.srcIdx + 1) % pv.sources.length;
+      const url = await resolveFreshLiveSource(pv.srcIdx);
+      pv.recovering = false;
+      attachPlayer(relay(url), 0);
+      renderSrcPicker();
+      return;
+    }
+    if (attempt === 0 || attempt === 1) {
+      bustResolvedPlay(ctx);
+      const d = await resolvePlayCached(ctx.vid, ctx.playRef.pid, ctx.playRef.vid);
+      const fresh = (d.sources || []).filter(x => x && x.url && x.alive !== false).slice(0, 5).map(x => x.url);
+      if (!fresh.length) throw new Error("未解析到播放地址");
+      pv.sources = fresh;
+      if (attempt === 1 && fresh.length > 1) pv.srcIdx = (pv.srcIdx + 1) % fresh.length;
+    } else if (attempt === 2 && pv.sources.length > 1) {
+      pv.srcIdx = (pv.srcIdx + 1) % pv.sources.length;
+    }
+    pv.recovering = false;
+    attachPlayer(relay(pv.sources[pv.srcIdx], "none"), resume);
+  } catch (e) {
+    pv.recovering = false;
+    recoverPlayback(reason + ": " + e.message, pv.recoveryGen);
+  }
 }
 
 function nextSource() {
@@ -2338,6 +2409,7 @@ function applyAspect() {
 function closePlayer() {
   saveCurProgress();
   clearInterval(pv.progTimer);
+  clearInterval(pv.stallTimer);
   clearTimeout(pv.hideTimer);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   if (pv.hls) { pv.hls.destroy(); pv.hls = null; }
@@ -2345,7 +2417,7 @@ function closePlayer() {
   $("#pPlayer").hidden = true; $("#morePanel").hidden = true; $("#moreDim").hidden = true;
   $("#ctlBack").hidden = true; $("#moreBtn").hidden = true;
   document.body.style.overflow = "";
-  pv.ctx = null; pv.controls = false; pv.picker = false;
+  pv.recoveryGen++; pv.ctx = null; pv.controls = false; pv.picker = false; pv.recovering = false;
 }
 
 /* 需求12⑦：竖屏全屏按钮——全屏走系统原生播放器（video 全屏 + 原生控件） */
@@ -2536,6 +2608,20 @@ if (bootHash.startsWith("detail/")) {
 fetch(BASE + "/api/health").then(r => r.ok).catch(() => hint("后端连接异常，部分功能不可用", 3500));
 licenseReverify();
 setInterval(licenseReverify, LICENSE_REVERIFY_MS);
+let backgroundedAt = 0;
+function refreshVisibleContent() {
+  if (document.hidden) return;
+  licenseReverify();
+  if (state.tab === "live") refreshLive(true);
+  if (pv.ctx && pv.ctx.kind === "live" && backgroundedAt && Date.now() - backgroundedAt >= 30000) {
+    recoverPlayback("长时间后台后返回", pv.recoveryGen);
+  }
+  backgroundedAt = 0;
+}
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") licenseReverify();
+  if (document.visibilityState === "visible") refreshVisibleContent();
+  else backgroundedAt = Date.now();
 });
+addEventListener("online", refreshVisibleContent);
+addEventListener("focus", refreshVisibleContent);
+addEventListener("pageshow", refreshVisibleContent);

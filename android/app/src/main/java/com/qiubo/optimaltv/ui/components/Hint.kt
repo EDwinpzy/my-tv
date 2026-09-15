@@ -21,7 +21,7 @@ import com.qiubo.optimaltv.ui.theme.sxs
 
 /**
  * 双击返回才彻底退出应用（需求⑥）：首次按返回轻提示「再按一次退出」，
- * 2.5s 内再按一次 finishAffinity 结束任务；超时重新计数。
+ * 2.5s 内再按一次执行明确退出；超时重新计数。
  * 用于足球/影视/我的三个主 tab 屏的「已到顶」返回分支（替代旧 moveTaskToBack）。
  */
 @Composable
@@ -33,7 +33,7 @@ fun rememberDoubleBackExit(onHint: (String) -> Unit): () -> Unit {
         // 「连按两次退不出去/误退出」（与 v1.18 跨时钟域 bug 同源）
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastBackAt < 2500) {
-            activity?.finishAffinity()
+            activity?.let { com.qiubo.optimaltv.lifecycle.ExitCoordinator.exit(it) }
         } else {
             lastBackAt = now
             onHint("再按一次返回键退出应用")

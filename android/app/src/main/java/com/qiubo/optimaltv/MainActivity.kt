@@ -190,6 +190,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        com.qiubo.optimaltv.lifecycle.AppLifecycleManager.onForeground()
         com.qiubo.optimaltv.OtvLog.i("activity ON_RESUME（窗口可见）")
         // v1.20 热更自动重启：后台完成下载的更新在回前台时立即生效
         com.qiubo.optimaltv.hotupdate.HotUpdateManager.onForegroundChanged(true)
@@ -198,6 +199,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        com.qiubo.optimaltv.lifecycle.AppLifecycleManager.onBackground()
         super.onPause()
         com.qiubo.optimaltv.OtvLog.i("activity ON_PAUSE")
         com.qiubo.optimaltv.announcement.AnnouncementManager.onForegroundChanged(false)

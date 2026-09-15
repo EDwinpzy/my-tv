@@ -16,6 +16,12 @@ from pathlib import Path
 
 HOME_SECTION_NAMES = ("最近热门", "最新上映", "豆瓣高分")
 CATEGORY_VALUES = {"movie", "tv", "anime", "variety", "short"}
+# 豆瓣 Explore 的搜索接口：`recent_hot` 会忽略 category/type 参数（三种排序拿到
+# 同一份列表），只有这个接口真正支持排序与类型/地区/年份/评分筛选。
+EXPLORE_API = "https://movie.douban.com/j/new_search_subjects"
+EXPLORE_PAGE_SIZE = 20
+EXPLORE_TAGS = {"movie": "电影", "tv": "电视剧", "anime": "动漫", "variety": "综艺", "short": "短剧"}
+SORT_CODES = {"hot": "U", "new": "R", "rating": "S"}  # U 热门 / R 最新 / S 高分
 SUBJECT_FIELDS = (
     "id", "douban_id", "title", "original_title", "aliases", "year",
     "category", "genres", "regions", "season", "rating", "rating_count",
@@ -58,7 +64,8 @@ def _integer(value, default=0):
 
 
 def is_short_drama(item):
-    tags = " ".join(_list(item.get("tags"))).lower()
+    # 列表接口只给 genres（由 card_subtitle 解析而来），详情接口才给 tags。
+    tags = " ".join(_list(item.get("tags")) + _list(item.get("genres"))).lower()
     positive = ("短剧", "微短剧", "网络短剧", "竖屏剧", "迷你剧")
     return any(token in tags for token in positive)
 
@@ -75,8 +82,41 @@ def _category(item, requested="movie"):
     return requested if requested in ("movie", "tv") else "movie"
 
 
+_CARD_YEAR = re.compile(r"^\d{4}$")
+
+
+def parse_card_subtitle(value):
+    """解析列表接口的 `card_subtitle`（`年份 / 地区 / 类型 / 导演 / 主演`）。
+
+    豆瓣列表接口只给这一行摘要，没有结构化的地区/类型/主创字段。不解析它，
+    「全部」页的类型/地区/年份筛选拿不到数据，按主创搜索也无从索引。剧集条目
+    常常省略末尾的导演/主演段，所以按位置对齐、按段数截断。
+    """
+    parts = [part.strip() for part in str(value or "").split("/")]
+    parts = [part for part in parts if part]
+    if not parts:
+        return {}
+    result = {}
+    if _CARD_YEAR.match(parts[0]):
+        result["year"] = parts[0]
+        parts = parts[1:]
+    for key, part in zip(("regions", "genres", "directors", "actors"), parts):
+        result[key] = [name for name in re.split(r"[\s、]+", part) if name]
+    return result
+
+
+def _merge_card_subtitle(raw):
+    """仅在条目缺少结构化字段时用 `card_subtitle` 补齐（详情响应里的字段优先）。"""
+    if not raw.get("card_subtitle") or raw.get("genres") or raw.get("regions"):
+        return raw
+    merged = dict(raw)
+    for key, value in parse_card_subtitle(raw.get("card_subtitle")).items():
+        merged.setdefault(key, value)
+    return merged
+
+
 def normalize_subject(raw, requested_category="movie"):
-    raw = raw if isinstance(raw, dict) else {}
+    raw = _merge_card_subtitle(raw if isinstance(raw, dict) else {})
     subject_id = _text(raw.get("douban_id") or raw.get("id")).removeprefix("douban:")
     rating = raw.get("rating") or raw.get("aggregateRating") or {}
     poster = raw.get("poster_url") or raw.get("cover_url") or raw.get("image")
@@ -116,6 +156,26 @@ def parse_explore(payload, category="movie"):
     if isinstance(rows, dict):
         rows = rows.get("items") or rows.get("subjects") or []
     return [normalize_subject(row, category) for row in rows if isinstance(row, dict)]
+
+
+def rating_range(value):
+    """`9分以上` → `9,10`（豆瓣 Explore 的 range 参数）。"""
+    match = re.search(r"(\d+)\s*分", str(value or ""))
+    return "%d,10" % int(match.group(1)) if match else "0,10"
+
+
+def normalize_explore_row(raw, category="movie"):
+    """Explore 搜索接口的一行（title/rate/cover/directors/casts）→ 目录条目。"""
+    raw = raw if isinstance(raw, dict) else {}
+    return normalize_subject({
+        "id": raw.get("id"),
+        "title": raw.get("title"),
+        "poster_url": raw.get("cover"),
+        "directors": raw.get("directors"),
+        "actors": raw.get("casts"),
+        "rating": {"value": raw.get("rate"), "count": 0},
+        "url": raw.get("url"),
+    }, category)
 
 
 def _json_ld(source):
@@ -189,12 +249,22 @@ class JsonDiskCache:
 
 
 class DoubanCatalog:
-    def __init__(self, fetch=None, cache=None, snapshot=None):
+    def __init__(self, fetch=None, cache=None, snapshot=None, media_index=None):
         self.fetch = fetch or self._fetch
         self.cache = cache
         self.snapshot = snapshot if isinstance(snapshot, dict) else self._load_snapshot()
+        self.media_index = media_index
         self._conditions = {}
         self._condition_lock = threading.Lock()
+
+    def _ingest(self, items):
+        if not self.media_index:
+            return
+        try:
+            self.media_index.upsert_many([item for item in items or [] if isinstance(item, dict)])
+        except Exception:
+            # Search indexing must never make the catalogue response unavailable.
+            pass
 
     @staticmethod
     def _load_snapshot():
@@ -203,6 +273,77 @@ class DoubanCatalog:
             return value if isinstance(value, dict) else {}
         except (OSError, ValueError):
             return {}
+
+    def _snapshot_section_items(self, category):
+        """快照中该分类首页三段的条目并集。"""
+        items = []
+        sections = ((self.snapshot.get("home") or {}).get(category) or {}).get("sections") or []
+        for section in sections:
+            for item in section.get("items") or []:
+                if isinstance(item, dict):
+                    items.append(item)
+        return items
+
+    def _snapshot_detail(self, douban_id):
+        """快照里预存的详情（云端出口到不了豆瓣，详情页只能靠它）。
+
+        快照不可能给每条都补详情（每次发布都有限额），补不到的条目回落到快照
+        列表行——标题/封面/评分/主创还在，总比详情页整页空掉强。
+        """
+        key = str(douban_id)
+        details = self.snapshot.get("details")
+        value = details.get(key) if isinstance(details, dict) else None
+        if not isinstance(value, dict) or not value.get("title"):
+            value = self._snapshot_lookup().get(key)
+        if isinstance(value, dict) and value.get("title"):
+            item = copy.deepcopy(value)
+            item["source"] = "douban-snapshot"
+            return item
+        return None
+
+    def _snapshot_lookup(self):
+        cached = getattr(self, "_snapshot_index", None)
+        if cached is None:
+            cached = {str(item.get("douban_id") or ""): item for item in self.snapshot_subjects()}
+            cached.pop("", None)
+            self._snapshot_index = cached
+        return cached
+
+    def snapshot_subjects(self):
+        """快照携带的全部条目：首页三段 + 搜索池 `index`（按豆瓣 ID 去重）。"""
+        items = []
+        for category in (self.snapshot.get("home") or {}):
+            items.extend(self._snapshot_section_items(category))
+        pool = self.snapshot.get("index")
+        items.extend(pool if isinstance(pool, list) else [])
+        unique, seen = [], set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("douban_id") or item.get("id") or "").removeprefix("douban:")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(item)
+        return unique
+
+    def warm_index(self):
+        """用内置快照预热搜索索引，冷实例无需触网即可本地搜索。
+
+        云端出口到不了豆瓣，`home()` 只能回落到快照；若访客直接搜索、从未打开
+        影视首页，索引就会是空的（v1.26 线上「搜索没有匹配的影片」）。索引里
+        已有数据时立刻返回，避免每次启动重复写入。
+        """
+        if not self.media_index:
+            return 0
+        try:
+            if self.media_index.count() > 0:
+                return 0
+        except Exception:
+            pass
+        items = self.snapshot_subjects()
+        self._ingest(items)
+        return len(items)
 
     @staticmethod
     def _fetch(url):
@@ -246,13 +387,20 @@ class DoubanCatalog:
                 condition._running = False
                 condition.notify_all()
 
-    def _explore(self, category, sort):
-        base = "tv" if category in ("tv", "anime", "variety", "short") else "movie"
-        label = {"U": "热门", "T": "最新", "S": "豆瓣高分"}.get(sort, "热门")
-        query = urllib.parse.urlencode({"category": label, "type": "全部", "limit": 20, "start": 0})
-        payload = self.fetch("https://m.douban.com/rexxar/api/v2/subject/recent_hot/%s?%s" % (base, query))
-        items = parse_explore(payload, base)
-        return [item for item in items if category in ("movie", "tv") or item["category"] == category]
+    def _explore(self, category, sort, page=1, genre="", region="", year="", rating=""):
+        """豆瓣 Explore 列表：排序与类型/地区/年份/评分筛选都在服务端完成。"""
+        tags = [EXPLORE_TAGS[category]]
+        if region and region != "全部":
+            tags.append(region)
+        if year and year not in ("全部", "更早"):
+            tags.append(year)
+        query = {"sort": sort, "range": rating_range(rating), "tags": ",".join(tags),
+                 "start": max(0, int(page) - 1) * EXPLORE_PAGE_SIZE}
+        if genre and genre != "全部":
+            query["genres"] = genre
+        payload = self.fetch(EXPLORE_API + "?" + urllib.parse.urlencode(query))
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        return [normalize_explore_row(row, category) for row in (rows or []) if isinstance(row, dict)]
 
     def home(self, category):
         if category not in CATEGORY_VALUES:
@@ -262,11 +410,13 @@ class DoubanCatalog:
         def produce():
             return {"category": category, "sections": [
                 {"title": HOME_SECTION_NAMES[0], "items": self._explore(category, "U")},
-                {"title": HOME_SECTION_NAMES[1], "items": self._explore(category, "T")},
+                {"title": HOME_SECTION_NAMES[1], "items": self._explore(category, "R")},
                 {"title": HOME_SECTION_NAMES[2], "items": self._explore(category, "S")},
             ], "stale": False, "source": "douban"}
 
-        return self._coalesced("home:" + category, "home", produce, snapshot_value)
+        result = self._coalesced("home:" + category, "home", produce, snapshot_value)
+        self._ingest([item for section in (result.get("sections") or []) for item in (section.get("items") or [])])
+        return result
 
     def filters(self, category):
         if category not in CATEGORY_VALUES:
@@ -293,62 +443,72 @@ class DoubanCatalog:
 
     @staticmethod
     def _matches(item, genre="", region="", year="", rating=""):
-        if genre and genre != "全部" and genre not in item.get("genres", []):
+        """快照兜底的筛选：条目缺某个字段时放行。
+
+        列表接口本身不含地区/类型/年份，快照里只有补过详情的条目才有；把「未知」
+        当作「不匹配」会让云端「全部」页在筛选后直接空掉。
+        """
+        if genre and genre != "全部" and item.get("genres") and genre not in item["genres"]:
             return False
-        if region and region != "全部" and region not in item.get("regions", []):
+        if region and region != "全部" and item.get("regions") and region not in item["regions"]:
             return False
-        if year and year != "全部":
+        if year and year != "全部" and item.get("year"):
             if year == "更早":
-                if not item.get("year") or int(item["year"][:4]) >= time.localtime().tm_year - 11:
+                if int(str(item["year"])[:4] or 0) >= time.localtime().tm_year - 11:
                     return False
-            elif item.get("year") != year:
+            elif str(item["year"]) != year:
                 return False
         if rating and rating != "全部":
             score = float(item.get("rating") or 0)
             if rating == "暂无评分":
-                return score <= 0
-            threshold_match = re.search(r"\d+", rating)
-            if threshold_match and score < int(threshold_match.group(0)):
-                return False
+                if score > 0:
+                    return False
+            else:
+                threshold_match = re.search(r"\d+", rating)
+                if threshold_match and score > 0 and score < int(threshold_match.group(0)):
+                    return False
         return True
 
     def show(self, category, genre="", region="", year="", rating="", sort="hot", page=1):
         if category not in CATEGORY_VALUES:
             raise ValueError("unsupported category")
-        sort_code = {"hot": "U", "new": "T", "rating": "S"}.get(sort, "U")
+        sort_code = SORT_CODES.get(sort, "U")
         key = "show:%s:%s:%s:%s:%s:%s:%s" % (category, genre, region, year, rating, sort_code, page)
 
         def produce():
-            base = "tv" if category in ("tv", "anime", "variety", "short") else "movie"
-            label = {"U": "热门", "T": "最新", "S": "豆瓣高分"}.get(sort_code, "热门")
-            query = urllib.parse.urlencode({"category": label, "type": genre or "全部", "limit": 24,
-                                            "start": max(0, int(page) - 1) * 24})
-            items = parse_explore(self.fetch("https://m.douban.com/rexxar/api/v2/subject/recent_hot/%s?%s" % (base, query)), base)
-            items = [item for item in items if (category in ("movie", "tv") or item["category"] == category)
-                     and self._matches(item, genre, region, year, rating)]
+            items = self._explore(category, sort_code, page, genre, region, year, rating)
             return {"category": category, "page": int(page), "items": items,
-                    "has_more": len(items) == 24, "source": "douban", "stale": False}
+                    "has_more": len(items) >= EXPLORE_PAGE_SIZE, "source": "douban", "stale": False}
 
-        snapshot_items = []
-        for section in (((self.snapshot.get("home") or {}).get(category) or {}).get("sections") or []):
-            snapshot_items.extend(section.get("items") or [])
-        fallback = {"category": category, "page": int(page), "items": snapshot_items,
-                    "has_more": False, "source": "douban-snapshot", "stale": True}
-        return self._coalesced(key, "show", produce, fallback)
+        # 快照兜底也遵守筛选与分页契约：否则云端「全部」页会忽略用户筛选、
+        # 并在一次响应里吐出整份快照。
+        snapshot_items = [item for item in self._snapshot_section_items(category)
+                          if self._matches(item, genre, region, year, rating)]
+        if sort_code == "S":
+            snapshot_items.sort(key=lambda item: -float(item.get("rating") or 0))
+        elif sort_code == "U":
+            snapshot_items.sort(key=lambda item: -int(item.get("rating_count") or 0))
+        else:
+            snapshot_items.sort(key=lambda item: str(item.get("year") or ""), reverse=True)
+        page_size = EXPLORE_PAGE_SIZE
+        page_no = max(1, int(page))
+        offset = (page_no - 1) * page_size
+        fallback = {"category": category, "page": page_no,
+                    "items": snapshot_items[offset:offset + page_size],
+                    "has_more": len(snapshot_items) > offset + page_size,
+                    "source": "douban-snapshot", "stale": True}
+        result = self._coalesced(key, "show", produce, fallback)
+        self._ingest(result.get("items") or [])
+        return result
 
-    def search(self, query, page=1):
+    def search(self, query, page=1, limit=30):
         query = str(query or "").strip()
         if not query:
-            return {"query": "", "page": int(page), "items": [], "has_more": False, "source": "douban"}
-        key = "search:%s:%s" % (query, int(page))
-
-        def produce():
-            params = urllib.parse.urlencode({"q": query, "start": max(0, int(page) - 1) * 20, "count": 20})
-            items = parse_explore(self.fetch("https://m.douban.com/rexxar/api/v2/search/subjects?" + params))
-            return {"query": query, "page": int(page), "items": items,
-                    "has_more": len(items) == 20, "source": "douban", "stale": False}
-
-        return self._coalesced(key, "search", produce, {"query": query, "page": int(page), "items": [], "has_more": False})
+            return {"query": "", "page": int(page), "limit": int(limit), "items": [],
+                    "total": 0, "has_more": False, "source": "local", "local": True}
+        items = self.media_index.search(query, limit=limit) if self.media_index else []
+        return {"query": query, "page": int(page), "limit": int(limit), "items": items,
+                "total": len(items), "has_more": False, "source": "local", "local": True}
 
     def detail(self, douban_id):
         douban_id = str(douban_id or "").removeprefix("douban:")
@@ -365,5 +525,8 @@ class DoubanCatalog:
             item["stale"] = False
             return item
 
-        return self._coalesced(key, "detail", produce, {"id": "douban:" + douban_id,
-                                "douban_id": douban_id, "title": "", "sources": []})
+        fallback = self._snapshot_detail(douban_id) or {"id": "douban:" + douban_id,
+                                                        "douban_id": douban_id, "title": "", "sources": []}
+        result = self._coalesced(key, "detail", produce, fallback)
+        self._ingest([result])
+        return result

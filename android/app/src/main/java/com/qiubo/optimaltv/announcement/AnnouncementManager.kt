@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.qiubo.optimaltv.BuildConfig
 import com.qiubo.optimaltv.OtvLog
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -88,6 +89,13 @@ object AnnouncementManager {
     fun onForegroundChanged(value: Boolean) {
         foreground = value
         if (value && this::appCtx.isInitialized) scope.launch { pollIfDue() }
+    }
+
+    /** 用户明确退出时停止轮询；普通切后台只由 foreground 门控，不销毁。 */
+    fun shutdown() {
+        foreground = false
+        scope.coroutineContext.cancelChildren()
+        _current.value = null
     }
 
     private suspend fun pollIfDue() {

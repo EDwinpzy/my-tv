@@ -28,8 +28,8 @@ class _FakeVodService:
     def show(self, category, query):
         return {"category": category, "items": [], "page": int(query.get("page", ["1"])[0])}
 
-    def search(self, query, page):
-        return {"query": query, "page": page, "items": []}
+    def search(self, query, page=1, limit=30):
+        return {"query": query, "page": page, "limit": limit, "items": [], "total": 0, "local": True}
 
     def detail(self, douban_id, defer_sources=False):
         return {"id": "douban:" + douban_id, "title": "肖申克的救赎",
@@ -74,6 +74,11 @@ class VodApiContractTest(unittest.TestCase):
 
     def test_detail_distinguishes_matching_from_unavailable(self):
         self.assertEqual(self.fetch("/vod/detail/1292052?defer_sources=1")["source_state"], "matching")
+
+    def test_search_has_one_local_api_for_all_clients(self):
+        payload = self.fetch("/api/search?q=%E8%82%96%E7%94%B3%E5%85%8B&limit=7")
+        self.assertTrue(payload["local"])
+        self.assertEqual(payload["limit"], 7)
 
     def test_filter_contract_has_no_language_row(self):
         payload = self.fetch("/vod/filters/movie")

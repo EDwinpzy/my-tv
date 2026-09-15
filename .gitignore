@@ -27,6 +27,15 @@ img_cache/
 tools/keys/
 *.whl
 
+# VOD 影视索引/抓取运行期缓存（本地代理自动生成，不入库）
+tools/backend-src/.cache/
+
+# 本机 adb 调试导出（ui dump / 截图清单）
+out-*.xml
+
+# 本机一次性的配置文件副本
+tools/_cloudbaserc.backup.json
+
 # Python caches and virtual environments
 __pycache__/
 *.py[cod]

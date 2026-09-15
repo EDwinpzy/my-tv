@@ -574,25 +574,23 @@ class LiveRepository(
      *  仅每次启动 app 时换一张（旧版按 matchId 散列，切比赛海报跟着换，用户不要） */
     val launchPosterIndex: Int = kotlin.random.Random.nextInt(POSTER_POOL)
 
-    /** 全站实时搜索（原版 doSearch：/hhkan/search?k= 中文直转、拼音转发站点匹配；冷抓走 75s slow client）。
-     *  retryNonce：app 侧重试序号，参与后端缓存键——重试时绕开空结果短缓存强制真抓取（需求 搜索#2）。
-     *  需求 影视#1：封面统一经后端 /hhkan/proxy 中继（域名探测重写 + 磁盘缓存）——
-     *  旧版直连源站 CDN，部分封面在 app 侧永远加载不出来。 */
+    /** 设备本地豆瓣媒体库搜索。retryNonce 仅保留二进制兼容，搜索不会触网也无需重试。 */
     suspend fun searchRemote(query: String, retryNonce: Int = 0): List<com.qiubo.optimaltv.data.model.VodItem> = withContext(Dispatchers.IO) {
         runCatching {
             val base = baseUrl()
             val k = URLEncoder.encode(query.trim(), "UTF-8")
-            val arr = getSlow(base, "/hhkan/search?k=$k&r=$retryNonce").optJSONArray("items")
+            val arr = getSlow(base, "/api/search?q=$k&limit=60").optJSONArray("items")
             (0 until (arr?.length() ?: 0)).mapNotNull { i ->
                 val o = arr?.optJSONObject(i) ?: return@mapNotNull null
-                val id = o.optLong("id", 0L)
-                if (id <= 0L) return@mapNotNull null
+                val id = o.optString("douban_id").ifBlank { o.optString("id").removePrefix("douban:") }
+                if (id.isBlank()) return@mapNotNull null
                 com.qiubo.optimaltv.data.model.VodItem(
-                    id = "hhkan:$id", sourceId = "hhkan",
+                    id = "douban:$id", sourceId = "douban",
                     title = o.optString("title").trim(),
-                    categoryId = "", rating = o.optDouble("score", 0.0),
-                    posterUrl = com.qiubo.optimaltv.data.source.HhkanSource.relayed(base, o.optString("cover")),
-                    detailRef = id.toString(),
+                    categoryId = "douban:" + o.optString("category", "movie"),
+                    year = o.optString("year"), rating = o.optDouble("rating", 0.0),
+                    desc = o.optString("summary"), posterUrl = o.optString("poster_url"),
+                    detailRef = id,
                 )
             }.filter { it.title.isNotBlank() }
         }.getOrDefault(emptyList())

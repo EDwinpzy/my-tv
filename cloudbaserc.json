@@ -9,6 +9,14 @@
       "runtime": "Python3.9",
       "installDependency": true,
       "handler": "admin_server.main"
+    },
+    {
+      "name": "otv-web",
+      "type": "HTTP",
+      "timeout": 60,
+      "runtime": "Python3.11",
+      "memorySize": 256,
+      "installDependency": false
     }
   ]
 }
