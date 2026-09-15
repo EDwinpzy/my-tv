@@ -148,7 +148,9 @@ fun VodScreen(nav: NavController) {
                 val libBlocks by Graph.repo.libBlocksFlow.collectAsStateWithLifecycle()
                 val fallbackSections by Graph.repo.sectionsFlow.collectAsStateWithLifecycle()
                 val hotSettled by Graph.repo.hotSettledFlow.collectAsStateWithLifecycle()
-                val selCid = selCatId.removePrefix("hhkan:").toIntOrNull()
+                /* 分类 id 现为 `douban:movie` 形态；用与 libBlocks 同一套解析，
+                   否则恒为 null → 三栏恒空（影视 tab 一直「暂无内容」）。 */
+                val selCid = com.qiubo.optimaltv.data.repo.VodRepository.categoryCid(selCatId)
                 /* 需求④（与 TV 版同款）：热门块就绪前不渲染部分板块/兜底网格，
                  * 防「兜底网格→部分板块→热门插最前」结构顶替导致的列表跳动 */
                 val sections = if (selCid == null) emptyList()

@@ -64,11 +64,15 @@ class LiveRepository(
          */
         private val NON_FOOTBALL_RE = Regex("男篮|女篮|篮球|排球|网球|琼斯杯|NBL|NBA|CBA|WNBA|冰球|棒球|橄榄球|乒乓|羽毛")
         private val EURO_CLUB_CUP_RE = Regex("欧冠|欧联|欧协|欧会|欧超|世俱|欧国联|欧罗巴")
+        /** 亚洲俱乐部赛事（2026-09-15 补）：亚冠精英赛 / 亚冠联2——中超球队常年参赛，
+         *  收紧白名单漏掉它之后，「今日比赛」在只有亚冠比赛的日子会整块空掉
+         *  （实测 09-15：当天 4 场全是亚冠，界面显示「暂无比赛」，其中 2 场正在直播）。 */
+        private val ASIA_CLUB_CUP_RE = Regex("亚冠")
         private val MAJOR_LEAGUE_RE = Regex("^(英超|西甲|意甲|德甲|法甲|荷甲|葡超|中超)")
         /** 中国赛事通道（v1.16 用户需求「增加中超球队的比赛」）：中超联赛+足协杯（参赛队=中超球队） */
         private val CHINA_COMP_RE = Regex("中超|足协杯")
         private val MAJOR_CUP_RE = Regex("^(英联杯|足总杯|社区盾|国王杯|西班牙超级杯|西超杯|意大利杯|意超杯|德国杯|德超杯|法国杯|法超杯|超级杯)")
-        private val NAT_COMP_RE = Regex("世预赛|欧预赛|欧国联|欧洲杯|美洲杯|亚洲杯|世界杯|友谊赛|国家队|亚运会|奥运会|金杯赛|非洲杯|麒麟杯")
+        private val NAT_COMP_RE = Regex("世预赛|欧预赛|欧国联|欧洲杯|美洲杯|亚洲杯|世界杯|友谊赛|国家队|亚运|奥运会|金杯赛|非洲杯|麒麟杯")
         fun heroImportance(m: MatchItem): Int {
             var s = 0
             if (m.isLive) s += 1000
@@ -193,6 +197,8 @@ class LiveRepository(
         if (CHINA_COMP_RE.containsMatchIn(L)) return true
         // 欧战（欧冠/欧联/欧协等）：参赛队遍布各国联赛，直接保留
         if (EURO_CLUB_CUP_RE.containsMatchIn(L)) return true
+        // 亚洲俱乐部赛事（亚冠精英赛/亚冠联2）：同为洲际赛事，含中超球队，直接保留
+        if (ASIA_CLUB_CUP_RE.containsMatchIn(L)) return true
         // 国家队大赛（世预赛/欧国联/友谊赛/亚洲杯…）
         if (NAT_COMP_RE.containsMatchIn(L)) return true
         // 传统豪门杯赛：需至少一方知名球队（top5 表 + 国家队表）
@@ -589,7 +595,8 @@ class LiveRepository(
                     title = o.optString("title").trim(),
                     categoryId = "douban:" + o.optString("category", "movie"),
                     year = o.optString("year"), rating = o.optDouble("rating", 0.0),
-                    desc = o.optString("summary"), posterUrl = o.optString("poster_url"),
+                    desc = o.optString("summary"),
+                    posterUrl = com.qiubo.optimaltv.data.source.VodApiSource.relayPoster(base, o.optString("poster_url")),
                     detailRef = id,
                 )
             }.filter { it.title.isNotBlank() }

@@ -30,7 +30,7 @@ class VodApiSource(
                         val json = fetchJson(baseUrl, "/vod/home?category=$key", okHttp)
                         val sections = json.optJSONArray("sections")
                         (0 until (sections?.length() ?: 0)).flatMap { i ->
-                            parseItems(sections?.optJSONObject(i)?.optJSONArray("items"), key)
+                            parseItems(sections?.optJSONObject(i)?.optJSONArray("items"), key, baseUrl)
                         }
                     }.getOrDefault(emptyList())
                 }
@@ -63,7 +63,19 @@ class VodApiSource(
         private fun strings(array: JSONArray?): List<String> =
             (0 until (array?.length() ?: 0)).mapNotNull { array?.optString(it)?.takeIf(String::isNotBlank) }
 
-        fun parseItems(array: JSONArray?, category: String): List<VodItem> =
+        /** 豆瓣图床（img1..img9.doubanio.com / asset）按 Referer 防盗链：App 直连回 HTTP 418，
+         *  客户端解码失败表现为「海报整片不出图」。统一经后端 /hhkan/proxy 中继——后端按豆瓣
+         *  自己的 Referer 出站并在各图床前端之间轮换（见 proxy.py `_img_fetch_with_mirrors`）。 */
+        private val DOUBAN_IMG_RE = Regex("""^https?://(?:img\d+\.doubanio\.com|asset\.doubanio\.com)/""", RegexOption.IGNORE_CASE)
+
+        fun relayPoster(base: String, raw: String): String {
+            val u = raw.trim()
+            if (u.length < 10 || !u.startsWith("http")) return u
+            return if (base.isBlank() || !DOUBAN_IMG_RE.containsMatchIn(u)) u
+            else base.trimEnd('/') + "/hhkan/proxy?u=" + URLEncoder.encode(u, "UTF-8")
+        }
+
+        fun parseItems(array: JSONArray?, category: String, base: String = ""): List<VodItem> =
             (0 until (array?.length() ?: 0)).mapNotNull { index ->
                 val item = array?.optJSONObject(index) ?: return@mapNotNull null
                 val rawId = item.optString("id").removePrefix("douban:")
@@ -74,7 +86,7 @@ class VodApiSource(
                     categoryId = "douban:$category", year = item.optString("year"),
                     area = strings(item.optJSONArray("regions")).joinToString(" / "),
                     rating = item.optDouble("rating", 0.0), desc = item.optString("summary"),
-                    posterUrl = item.optString("poster_url"), tags = strings(item.optJSONArray("genres")),
+                    posterUrl = relayPoster(base, item.optString("poster_url")), tags = strings(item.optJSONArray("genres")),
                     detailRef = rawId,
                 )
             }
@@ -85,7 +97,7 @@ class VodApiSource(
             return HhkanSource.HomeData(
                 sections = (0 until (sections?.length() ?: 0)).mapNotNull { index ->
                     val section = sections?.optJSONObject(index) ?: return@mapNotNull null
-                    HhkanSource.ChannelSection(section.optString("title"), parseItems(section.optJSONArray("items"), category))
+                    HhkanSource.ChannelSection(section.optString("title"), parseItems(section.optJSONArray("items"), category, base))
                 }, carousel = emptyList(),
             )
         }
@@ -103,7 +115,7 @@ class VodApiSource(
             val query = listOf("genre" to type, "region" to area, "year" to year, "rating" to rating, "sort" to sort, "page" to page.toString())
                 .joinToString("&") { (key, value) -> "$key=${URLEncoder.encode(value, "UTF-8")}" }
             val json = fetchJson(base, "/vod/show/$category?$query", client)
-            return HhkanSource.ShowPage(parseItems(json.optJSONArray("items"), category), json.optBoolean("has_more"))
+            return HhkanSource.ShowPage(parseItems(json.optJSONArray("items"), category, base), json.optBoolean("has_more"))
         }
 
         fun fetchDetail(base: String, client: OkHttpClient, id: String): HhkanSource.Companion.DetailInfo {
@@ -121,7 +133,7 @@ class VodApiSource(
             }
             return HhkanSource.Companion.DetailInfo(
                 title = json.optString("title"), year = json.optString("year"),
-                desc = json.optString("summary"), poster = json.optString("poster_url"),
+                desc = json.optString("summary"), poster = relayPoster(base, json.optString("poster_url")),
                 rating = json.optDouble("rating", 0.0),
                 meta = listOf(json.optString("year"), strings(json.optJSONArray("regions")).joinToString(" / "), strings(json.optJSONArray("genres")).joinToString(" / ")).filter(String::isNotBlank).joinToString(" / "),
                 actors = strings(json.optJSONArray("actors")).joinToString(" / "),

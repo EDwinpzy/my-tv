@@ -353,6 +353,19 @@ class VodRepository(
     }
 
     companion object {
+        /**
+         * 分类 id → 片库三栏 cid（1 电影 / 2 电视剧 / 3 动漫 / 4 综艺 / 6 短剧）。
+         *
+         * 2026-09-15 修复：目录切豆瓣后分类 id 是 `douban:movie` 形态，而首页按旧口径
+         * `removePrefix("hhkan:").toIntOrNull()` 解析——结果恒为 null，三栏恒空，影视 tab
+         * 一直显示「暂无内容」（数据其实已由 libBlocks 拉到 libBlocksFlow 里）。这里与
+         * [libBlocks] 用同一套解析，旧 `hhkan:<数字>` 形态继续兼容。
+         */
+        fun categoryCid(categoryId: String): Int? {
+            val raw = categoryId.removePrefix("douban:").removePrefix("hhkan:")
+            return categoryNumber(raw) ?: raw.toIntOrNull()
+        }
+
         private fun categoryNumber(key: String): Int? = when (key) {
             "movie" -> 1; "tv" -> 2; "anime" -> 3; "variety" -> 4; "short" -> 6; else -> null
         }

@@ -2519,25 +2519,45 @@ def _img_fetch_pooled(url: str, referer: str):
         return _once()
 
 
+# 豆瓣图床：img1..img9.doubanio.com 是同一份存储的不同前端（路径完全通用），但会按
+# Referer 做防盗链——第三方 Referer（含 hhkan 的）回 418/HTML，客户端 Coil 拿到非图
+# 直接解码失败，表现为「海报整片不出图」。所以出站一律带豆瓣自己的 Referer，并在
+# 各前端之间轮换：哪台可达用哪台。
+DOUBAN_IMG_RE = re.compile(r"(?i)^https?://img\d+\.doubanio\.com/")
+DOUBAN_IMG_HOSTS = ("img9.doubanio.com", "img1.doubanio.com", "img2.doubanio.com", "img3.doubanio.com")
+DOUBAN_IMG_REFERER = "https://movie.douban.com/"
+
+
 def _img_fetch_with_mirrors(url: str):
-    """vres.* 图按 IMG_DOMAINS 轮换镜像抓取；非 vres 域只试原地址。
-    返回 (bytes, ctype) 或 None（全部失败——调用方回落通用 urllib 路径）。"""
+    """vres.* 按 IMG_DOMAINS、豆瓣图床按 DOUBAN_IMG_HOSTS 轮换镜像抓取；
+    其余域只试原地址。返回 (bytes, ctype) 或 None（全部失败——调用方回落通用 urllib 路径）。"""
     from urllib.parse import urlunsplit
     sp = urlparse(url)
     candidates = [url]
+    referer = hhkan.BASE + "/"
     if re.match(r"(?i)^https?://vres\.", url):
         for base in hhkan.IMG_DOMAINS:
             host = urlparse(base).netloc
             if host and host != sp.netloc:
                 candidates.append(urlunsplit((sp.scheme, host, sp.path, sp.query, "")))
-    referer = hhkan.BASE + "/"
+    elif DOUBAN_IMG_RE.match(url):
+        referer = DOUBAN_IMG_REFERER
+        for host in DOUBAN_IMG_HOSTS:
+            if host != sp.netloc:
+                candidates.append(urlunsplit((sp.scheme, host, sp.path, sp.query, "")))
+    last_err = ""
     for cand in candidates:
         try:
             data, ctype = _img_fetch_pooled(cand, referer)
             if ctype and ctype.startswith("image/"):
                 return data, ctype
-        except Exception:
+            last_err = "ctype=%s" % ctype
+        except Exception as e:
+            last_err = str(e)[:140]
             continue
+    # 诊断留痕：失败原因只在这里可见（调用方只回 502，不写日志）。
+    print("[img] 抓取失败 url=%s referer=%s err=%s" % (url[:96], referer, last_err or "no-candidate"),
+          flush=True)
     return None
 
 
@@ -3818,7 +3838,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-        headers = {"User-Agent": hhkan.UA, "Referer": hhkan.BASE + "/"}
+        headers = {"User-Agent": hhkan.UA,
+                   "Referer": DOUBAN_IMG_REFERER if DOUBAN_IMG_RE.match(url) else hhkan.BASE + "/"}
         if rng:
             headers["Range"] = rng
         try:

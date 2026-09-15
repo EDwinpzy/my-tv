@@ -187,7 +187,7 @@ object AppStartup {
             ?.forEach { urls += it.posterUrl }
         // 每个分类 tab 页（含「全部」兜底网格）：三块卡片封面；无三块的分类取目录前 18 张
         (catsForUrls.map { it.id } + "").forEach { cid ->
-            val secs = cid.removePrefix("hhkan:").toIntOrNull()?.let { blocks[it] }.orEmpty()
+            val secs = com.qiubo.optimaltv.data.repo.VodRepository.categoryCid(cid)?.let { blocks[it] }.orEmpty()
             if (secs.isNotEmpty()) {
                 secs.forEach { sec -> sec.items.forEach { if (it.posterUrl.isNotBlank()) urls += it.posterUrl } }
             } else {

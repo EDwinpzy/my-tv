@@ -194,7 +194,9 @@ fun VodScreen(nav: NavController) {
                 }
                 val libBlocks by Graph.repo.libBlocksFlow.collectAsStateWithLifecycle()
                 val hotSettled by Graph.repo.hotSettledFlow.collectAsStateWithLifecycle()
-                val selCid = selCatId.removePrefix("hhkan:").toIntOrNull()
+                /* 分类 id 现为 `douban:movie` 形态；用与 libBlocks 同一套解析，
+                   否则恒为 null → 三栏恒空（影视 tab 一直「暂无内容」）。 */
+                val selCid = com.qiubo.optimaltv.data.repo.VodRepository.categoryCid(selCatId)
                 /* 需求④（光标跳行修复）：三栏就绪前不渲染任何板块——
                  * 否则「空态 → 部分板块 → 热门插最前」两次结构顶替会把焦点
                  * 甩到「最新上线」（用户看到按一下下键就滚过最近热门）。 */
