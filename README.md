@@ -63,7 +63,7 @@ My TV/
 ├── internal/mobile/          # 移动版工程（触屏；data/playback/license 与 TV 版字节级一致，sync_shared.py 监管）
 ├── cloudfunctions/           # CloudBase 云函数（部署包）
 │   │                         #   2026-09-15：后台管理已完整下线（otv-admin 函数删除、/admin 无上游），
-│   │                         #   线上后台在自建站点（见同级仓库 MyTV-Cloud）；activate/hotupdate/
+│   │                         #   线上后台在自建站点（见内嵌目录「后台管理系统」）；activate/hotupdate/
 │   │                         #   iptv-rebuild 仍服务存量设备，待 v1.26 铺开后再下线
 │   ├── activate/             # 卡密激活（已迁自建站点，留作回滚）
 │   ├── hotupdate/            # 热更 check/report + 公告下发（已迁自建站点，留作回滚）
@@ -82,7 +82,7 @@ My TV/
 ```
 
 > 后台管理、卡密激活、热更分发、电视源发布的新实现不在本仓库，见同级仓库
-> **[MyTV-Cloud](../MyTV-Cloud)**（Sites / Cloudflare Worker + D1 + R2）；线上入口
+> **[后台管理系统](./后台管理系统)**（Sites / Cloudflare Worker + D1 + R2）；线上入口
 > https://mytv-cloud.pengzhiyuan0724.chatgpt.site 。
 
 ## 三条铁律
