@@ -54,6 +54,9 @@ object StreamDecryptServer {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val pool = arrayOfNulls<WebView>(POOL_SIZE)
     private var appContext: Context? = null
+    @Volatile private var serverSocket: ServerSocket? = null
+    @Volatile private var connPool: java.util.concurrent.ExecutorService? = null
+    private val consecutiveTimeouts = java.util.concurrent.atomic.AtomicIntegerArray(POOL_SIZE)
 
     /** 解密并发闸：池里每个 WebView 一张票；解密段持票执行（替代旧全局 synchronized） */
     private val poolSem = java.util.concurrent.Semaphore(POOL_SIZE, true)
@@ -68,17 +71,19 @@ object StreamDecryptServer {
             // v1.8（2026-08-30）加固：accept 循环外层自愈——实测桥线程会因 socket 异常
             // 静默退出且无任何重启方（直播全部假死 70s/请求）；现在捕获后 1s 重听。
             // 连接处理挪到 4 线程池：单个慢连接（如读了半截头就断）不再卡死整个桥。
-            val connPool = java.util.concurrent.Executors.newFixedThreadPool(4) { r ->
+            val executor = java.util.concurrent.Executors.newFixedThreadPool(4) { r ->
                 Thread(r, "otv-decrypt-conn").apply { isDaemon = true }
             }
+            connPool = executor
             Thread {
-                while (true) {
+                while (started) {
                     try {
                         ServerSocket(PORT, 8, InetAddress.getByName("127.0.0.1")).use { server ->
+                            serverSocket = server
                             Log.i(TAG, "decrypt bridge listening :$PORT")
-                            while (true) {
+                            while (started) {
                                 val sock = server.accept()
-                                connPool.execute {
+                                executor.execute {
                                     runCatching { handle(sock) }
                                         .onFailure {
                                             Log.w(TAG, "decrypt request failed: ${it.message}")
@@ -89,8 +94,11 @@ object StreamDecryptServer {
                         }
                         return@Thread
                     } catch (e: Exception) {
+                        if (!started) return@Thread
                         Log.e(TAG, "decrypt bridge crashed (${e.message}) → 1s 后重启监听")
                         try { Thread.sleep(1_000) } catch (_: InterruptedException) { return@Thread }
+                    } finally {
+                        serverSocket = null
                     }
                 }
             }.apply { isDaemon = true; name = "otv-decrypt" }.start()
@@ -105,6 +113,29 @@ object StreamDecryptServer {
             }, 1_200)
 
         }
+    }
+
+    /** Rebuild every WebView slot while keeping the local bridge available. */
+    fun reset() {
+        Log.w(TAG, "decrypt bridge reset")
+        mainHandler.post {
+            for (slot in pool.indices) {
+                rebuildSlot(slot)
+                consecutiveTimeouts.set(slot, 0)
+            }
+        }
+    }
+
+    /** Explicit app exit: close the listener, workers and WebView renderer pool. */
+    fun shutdown() {
+        if (!started) return
+        started = false
+        runCatching { serverSocket?.close() }
+        serverSocket = null
+        connPool?.shutdownNow()
+        connPool = null
+        reset()
+        Log.i(TAG, "decrypt bridge shutdown")
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -164,6 +195,7 @@ object StreamDecryptServer {
     private fun rebuildSlot(slot: Int) {
         val wv = pool[slot] ?: return
         pool[slot] = null
+        consecutiveTimeouts.set(slot, 0)
         runCatching { wv.destroy() }
     }
 
@@ -314,11 +346,17 @@ object StreamDecryptServer {
             }
         }
         latch.await(12, TimeUnit.SECONDS)
-        if (result.get() == null && callbacks.get() == 0 && polls > 0) {
+        val found = result.get()
+        if (found != null) {
+            consecutiveTimeouts.set(slot, 0)
+        } else if (callbacks.get() == 0 && polls > 0) {
             Log.e(TAG, "slot=$slot 疑似僵死（零回调）→ 请求重建")
             mainHandler.post { rebuildSlot(slot) }
+        } else if (consecutiveTimeouts.incrementAndGet(slot) >= 2) {
+            Log.e(TAG, "slot=$slot 连续两次未解出地址 → 请求重建")
+            mainHandler.post { rebuildSlot(slot) }
         }
-        return result.get()
+        return found
     }
 
     /** 与 node/QuickJS 版 extractStreamUrl 同语义：m3u8.html?id= 优先，.m3u8 直链兜底 */

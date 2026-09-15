@@ -236,7 +236,6 @@ fun SearchScreen(nav: NavController) {
             q.dropLast(trailing.length).trim() else q
         stripped.ifBlank { q }
     }
-    val hasChinese = remember(searchable) { searchable.any { it.isLetter() && it.code > 127 } }
     var remote by remember { mutableStateOf<List<VodItem>>(emptyList()) }
     var remoteLoading by remember { mutableStateOf(false) }
     var lastSearched by remember { mutableStateOf("") }
@@ -246,16 +245,12 @@ fun SearchScreen(nav: NavController) {
             lastSearched = ""   // 清空后重输同一词也要重搜
             return@LaunchedEffect
         }
-        if (!hasChinese) return@LaunchedEffect
         if (searchable == lastSearched) return@LaunchedEffect
         delay(450)
         if (!isActive) return@LaunchedEffect
         lastSearched = searchable
         remoteLoading = true
-        var r = Graph.live.searchRemote(searchable, retryNonce = 0)
-        if (r.isEmpty()) { delay(3000); r = Graph.live.searchRemote(searchable, retryNonce = 1) }
-        if (r.isEmpty()) { delay(6000); r = Graph.live.searchRemote(searchable, retryNonce = 2) }
-        remote = r
+        remote = Graph.live.searchRemote(searchable)
         remoteLoading = false
     }
     // v1.19 流畅度：本地目录扫描挪 Default 派发——旧版 remember(query){search(query)}

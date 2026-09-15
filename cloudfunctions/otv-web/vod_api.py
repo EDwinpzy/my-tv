@@ -27,8 +27,8 @@ class VodService:
             page=int(value("page", "1") or 1),
         )
 
-    def search(self, query, page=1):
-        return self.catalog.search(query, page)
+    def search(self, query, page=1, limit=30):
+        return self.catalog.search(query, page=page, limit=limit)
 
     def detail(self, douban_id, defer_sources=False):
         subject = copy.deepcopy(self.catalog.detail(douban_id))

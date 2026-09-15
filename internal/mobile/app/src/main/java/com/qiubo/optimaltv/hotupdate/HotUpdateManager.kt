@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.qiubo.optimaltv.BuildConfig
 import com.qiubo.optimaltv.OtvLog
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -91,7 +92,8 @@ object HotUpdateManager {
     /** 热更 zip 必备条目：与 build_backend_zip.py 的 REPL 集合一致 + www 资源目录 */
     private val REQUIRED_ENTRIES = listOf(
         "proxy.py", "hhkan.py", "scraper.py", "team_backdrop.py", "decrypt_stream.js",
-        "douban_catalog.py", "douban_snapshot.json", "vod_api.py", "vod_sources.py",
+        "douban_catalog.py", "douban_snapshot.json", "media_index.py", "pinyin_map.json",
+        "vod_api.py", "vod_sources.py",
         "vod_sources.default.json",
     )
     private const val REQUIRED_PREFIX = "www/"
@@ -141,6 +143,11 @@ object HotUpdateManager {
         if (fg && this::appCtx.isInitialized) {
             com.qiubo.optimaltv.BackendService.flushPendingReboot(appCtx, scope)
         }
+    }
+
+    fun shutdown() {
+        appForeground = false
+        scope.coroutineContext.cancelChildren()
     }
 
     /** App.onCreate 调用；快速 check（强更走阻断流，非强更弹提案），下载绝不在此路径 */

@@ -867,7 +867,7 @@
   "里奥阿维": {
     "url": null,
     "id": null,
-    "ts": 1788619855
+    "ts": 1789347421
   },
   "锡永": {
     "url": null,
@@ -1382,7 +1382,7 @@
   "阿马多拉": {
     "url": null,
     "id": null,
-    "ts": 1788619850
+    "ts": 1789347421
   },
   "希洪竞技": {
     "url": null,
@@ -1533,5 +1533,25 @@
     "url": null,
     "id": null,
     "ts": 1788844151
+  },
+  "乌迪内斯": {
+    "url": "https://assets.football-logos.cc/logos/italy/64x64/udinese.4523f3a2.png",
+    "id": null,
+    "ts": 1789347420
+  },
+  "科莫": {
+    "url": "https://assets.football-logos.cc/logos/italy/64x64/como-1907.d8c8acba.png",
+    "id": null,
+    "ts": 1789347421
+  },
+  "摩里伦斯": {
+    "url": "https://assets.football-logos.cc/logos/portugal/64x64/moreirense.f45542ac.png",
+    "id": null,
+    "ts": 1789347421
+  },
+  "埃斯托里尔": {
+    "url": "https://assets.football-logos.cc/logos/portugal/64x64/estoril.3788c948.png",
+    "id": null,
+    "ts": 1789347421
   }
 }

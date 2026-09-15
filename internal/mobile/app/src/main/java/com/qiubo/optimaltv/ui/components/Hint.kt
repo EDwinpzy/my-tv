@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.sp
 
 /**
  * 双击返回才彻底退出应用（移动版沿用 TV 版交互习惯）：
- * 首次返回轻提示「再按一次退出」，2.5s 内再按 finishAffinity。
+ * 首次返回轻提示「再按一次退出」，2.5s 内执行明确退出。
  */
 @Composable
 fun rememberDoubleBackExit(onHint: (String) -> Unit): () -> Unit {
@@ -34,7 +34,7 @@ fun rememberDoubleBackExit(onHint: (String) -> Unit): () -> Unit {
         // 「连按两次退不出去/误退出」（与 v1.18 跨时钟域 bug 同源）
         val now = android.os.SystemClock.uptimeMillis()
         if (now - lastBackAt < 2500) {
-            activity?.finishAffinity()
+            activity?.let { com.qiubo.optimaltv.lifecycle.ExitCoordinator.exit(it) }
         } else {
             lastBackAt = now
             onHint("再按一次返回键退出应用")

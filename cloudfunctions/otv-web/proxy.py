@@ -15,6 +15,7 @@ import hhkan_snapshot  # 好好看静态快照（云函数出口受风控时容�
 import team_backdrop  # 球队 16:9 海报（TheSportsDB）
 import scraper  # 视频刮削（片名 → 完整元数据）
 import douban_catalog
+import media_index
 import vod_api
 import vod_sources
 import time
@@ -101,17 +102,33 @@ VOD_SERVICE = None
 _VOD_SERVICE_LOCK = threading.Lock()
 
 
+def _vod_data_dir(preferred=None):
+    """影视缓存/索引目录：代码目录可写就用它，不可写（云函数只读挂载）就落到临时目录。"""
+    preferred = Path(preferred) if preferred is not None else Path(__file__).parent / ".cache"
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        return preferred
+    except OSError:
+        fallback = Path(tempfile.gettempdir()) / "otv-data"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
 def _get_vod_service():
     global VOD_SERVICE
     if VOD_SERVICE is None:
         with _VOD_SERVICE_LOCK:
             if VOD_SERVICE is None:
-                cache_root = Path(os.environ.get("OTV_DATA_DIR") or Path(__file__).parent / ".cache")
+                cache_root = Path(os.environ.get("OTV_DATA_DIR") or _vod_data_dir())
+                local_index = media_index.MediaIndex(cache_root / "media" / "mytv.db")
                 catalog = douban_catalog.DoubanCatalog(
-                    cache=douban_catalog.JsonDiskCache(cache_root / "douban"))
+                    cache=douban_catalog.JsonDiskCache(cache_root / "douban"), media_index=local_index)
                 registry = vod_sources.SourceRegistry.load_current()
                 registry.history = vod_sources.LineHistory(cache_root / "vod_line_history.json")
                 VOD_SERVICE = vod_api.VodService(catalog, registry)
+                # 内置豆瓣快照预热搜索索引：云端出口到不了豆瓣，冷实例即便是
+                # 访客直接搜索（没打开过影视首页）也必须先有结果。
+                catalog.warm_index()
     # 管理端发布的配置由 App 原子写入运行目录；请求到来时热替换，无需重启 App。
     current = vod_sources.SourceRegistry.load_current()
     if hasattr(VOD_SERVICE, "registry") and current.version > VOD_SERVICE.registry.version:
@@ -864,11 +881,14 @@ def _stream_via_cloud(match_id, src, fresh):
     return None
 
 
+STREAM_SUCCESS_TTL = 60
+
+
 def resolve_stream(match_id, src="bb", fresh=False):
     """返回 (payload, cached) — 通过 node 解密播放器提取流地址
     src: plu / bb → 每场专属频道页 → ballbar.php/plu.php 混淆播放器
          qqlive100..103 → 高清线路公共播放器 qqliveHD{编号}.php
-    fresh: True = 跳过成功结果的 300s 缓存强制重新解析（播放中 90s 静默续签 /
+    fresh: True = 跳过成功结果的 60s 缓存强制重新解析（播放中静默续签 /
          失败重试用——上游签名 URL 有效期仅 17~50 分钟，缓存会返回已过期地址）
     """
     now = time.time()
@@ -882,7 +902,7 @@ def resolve_stream(match_id, src="bb", fresh=False):
         c = STREAM_CACHE.get(key)
         # ts<=0 表示「未开播」结果，永不缓存（前端重试时每次重新解析拿最新信号）
         # fresh=1 同样绕过成功缓存；写入照旧（缓存里总是留最新）
-        if not fresh and c and c["ts"] > 0 and now - c["ts"] < 300:
+        if not fresh and c and c["ts"] > 0 and now - c["ts"] < STREAM_SUCCESS_TTL:
             return c["data"], True
         payload = {"url": None, "error": None}
     try:
@@ -908,7 +928,7 @@ def resolve_stream(match_id, src="bb", fresh=False):
                 payload["error"] = "未找到播放器地址"
                 with _stream_lock:
                     _trim_cache(STREAM_CACHE, STREAM_CACHE_MAX)
-                    STREAM_CACHE[key] = {"ts": now, "data": payload}
+                    STREAM_CACHE[key] = {"ts": 0, "data": payload}
                 return payload, False
             # 2. 抓播放器页（必须带正确 Referer）
             page = fetch_url(mm.group(1), referer="http://www.yoozb.live/")
@@ -955,7 +975,7 @@ def resolve_stream(match_id, src="bb", fresh=False):
         payload["error"] = "解析失败: %s" % str(e)[:100]
         with _stream_lock:
             _trim_cache(STREAM_CACHE, STREAM_CACHE_MAX)
-            STREAM_CACHE[key] = {"ts": now, "data": payload}
+            STREAM_CACHE[key] = {"ts": 0, "data": payload}
         return payload, False
 
 
@@ -3009,7 +3029,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path.startswith("/vod/"):
+        if parsed.path.startswith("/vod/") or parsed.path == "/api/search":
             self._vod_api(parsed)
             return
         if parsed.path == "/api/matches":
@@ -3408,9 +3428,14 @@ class Handler(SimpleHTTPRequestHandler):
         """统一豆瓣目录与播放源接口。"""
         path = parsed.path
         query = parse_qs(parsed.query)
-        service = _get_vod_service()
         try:
-            if path == "/vod/home":
+            # 初始化失败必须回一份可读的 503，别让异常逃出处理器把响应整条丢掉。
+            service = _get_vod_service()
+            if path == "/api/search":
+                payload = service.search(
+                    (query.get("q") or [""])[0], page=1,
+                    limit=_safe_int((query.get("limit") or ["30"])[0], 30, lo=1, hi=100))
+            elif path == "/vod/home":
                 payload = service.home((query.get("category") or ["movie"])[0])
             elif path == "/vod/search":
                 payload = service.search(

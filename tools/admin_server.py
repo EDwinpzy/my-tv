@@ -213,7 +213,7 @@ HU_ENDPOINT = "https://appletv-d5ge1bth794873f76.service.tcloudbase.com/hotupdat
 # 与 APK HotUpdateManager / hotupdate_admin_upsert RPC 的校验口径一致
 HU_REQUIRED_ENTRIES = (
     "proxy.py", "hhkan.py", "scraper.py", "team_backdrop.py", "decrypt_stream.js",
-    "douban_catalog.py", "douban_snapshot.json", "vod_api.py",
+    "douban_catalog.py", "douban_snapshot.json", "media_index.py", "pinyin_map.json", "vod_api.py",
     "vod_sources.py", "vod_sources.default.json",
 )
 HU_MAX_BYTES = 220 * 1024 * 1024

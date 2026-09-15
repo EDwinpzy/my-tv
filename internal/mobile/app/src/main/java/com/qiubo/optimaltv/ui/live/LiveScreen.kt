@@ -178,7 +178,11 @@ private const val LIVE_BAND_PORTRAIT = 520f
 @Composable
 fun LiveScreen(nav: NavController, vm: LiveViewModel = viewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val refreshEpoch by com.qiubo.optimaltv.lifecycle.AppLifecycleManager.refreshEpoch.collectAsStateWithLifecycle()
     val s = rememberUiScale()
+    LaunchedEffect(refreshEpoch) {
+        if (refreshEpoch > 0L) vm.refresh(silent = true)
+    }
     // 竖屏（2026-09-07 竖屏优化）：hero 内容列/CTA/分组标题/筛选行侧距按 750 基准收窄
     val portrait = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
         android.content.res.Configuration.ORIENTATION_PORTRAIT

@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
  *
  * 本类自身几乎无逻辑：进程创建时 App.onCreate（按进程名分叉）已起 python；
  * 这里只提供「让系统拉起 :backend 进程」的组件与 ACTION_REBOOT 自毁入口。
- * START_STICKY：进程被 LMK/系统回收后系统自动重建（重建即新后端，等价免费热重启）。
+ * START_NOT_STICKY：普通后台不主动销毁；用户明确退出后不允许系统自动拉起后端。
  */
 class BackendService : Service() {
 
@@ -33,13 +33,20 @@ class BackendService : Service() {
             android.os.Process.killProcess(android.os.Process.myPid())
             return START_NOT_STICKY
         }
-        return START_STICKY
+        if (intent?.action == ACTION_SHUTDOWN) {
+            OtvLog.i("backend: 收到明确退出指令")
+            stopSelf()
+            android.os.Process.killProcess(android.os.Process.myPid())
+            return START_NOT_STICKY
+        }
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
         const val ACTION_REBOOT = "com.qiubo.optimaltv.backend.REBOOT"
+        const val ACTION_SHUTDOWN = "com.qiubo.optimaltv.backend.SHUTDOWN"
 
         /** P2 修复（2026-09-04）：后台期间 reboot 指令被后台 Activity 启动限制拦下时置位，
          *  回前台 flushPendingReboot 补发——旧版静默吞掉，更新已下载但 :backend 不重启，

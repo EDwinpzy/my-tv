@@ -187,7 +187,11 @@ private const val LIVE_BAND = 700f
 @Composable
 fun LiveScreen(nav: NavController, vm: LiveViewModel = viewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val refreshEpoch by com.qiubo.optimaltv.lifecycle.AppLifecycleManager.refreshEpoch.collectAsStateWithLifecycle()
     val s = rememberUiScale()
+    LaunchedEffect(refreshEpoch) {
+        if (refreshEpoch > 0L) vm.refresh(silent = true)
+    }
     // v1.22 起播提速（2026-09-05 需求⑤）：列表就绪即后台预热正在直播比赛的 bb 源
     //（命中后端 300s 成功缓存）——点卡进直播时解析秒回，省去 1-2s+ 的
     //「频道页+播放器页+解密」链路等待

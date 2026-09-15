@@ -12,6 +12,9 @@ import threading
 def start(backend_dir, port=8090):
     """启动内置后端（阻塞前先 setpath 再起线程）。"""
     sys.path.insert(0, backend_dir)
+    # Hot-update extraction replaces backend_dir.  Store scraped metadata beside it
+    # under filesDir so SQLite survives both backend and APK upgrades.
+    os.environ.setdefault("OTV_DATA_DIR", os.path.dirname(backend_dir))
     # 让 proxy 的相对资源（decrypt_stream.js/team_icon_cache 等）落回解压目录
     os.chdir(backend_dir)
     import proxy

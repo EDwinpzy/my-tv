@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.qiubo.optimaltv.BuildConfig
 import com.qiubo.optimaltv.OtvLog
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -85,6 +86,11 @@ object AnnouncementManager {
     fun onForegroundChanged(value: Boolean) {
         foreground = value
         if (value && this::appCtx.isInitialized) scope.launch { pollIfDue() }
+    }
+
+    fun shutdown() {
+        foreground = false
+        scope.coroutineContext.cancelChildren()
     }
 
     private suspend fun pollIfDue() {

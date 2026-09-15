@@ -20,7 +20,7 @@ WHEEL = ROOT / "tools" / "vendor" / "quickjs-1.19.4-cp311-cp311-manylinux_2_17_x
 
 FILES = ["proxy.py", "hhkan.py", "hhkan_snapshot.py", "hhkan_snapshot.json",
          "team_backdrop.py", "scraper.py", "decrypt_stream.js",
-         "decrypt_python.py", "douban_catalog.py", "douban_snapshot.json",
+         "decrypt_python.py", "douban_catalog.py", "douban_snapshot.json", "media_index.py", "pinyin_map.json",
          "vod_api.py", "vod_sources.py", "vod_sources.default.json"]
 
 BOOTSTRAP = """#!/bin/bash
